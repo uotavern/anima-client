@@ -1152,7 +1152,7 @@
         border-radius: 4px; padding: 3px 8px; }
       .shop-btn:hover { background: rgba(138, 180, 248, .28); }
       /* ---- user macros / hotkeys editor (toggled by 'O') ---- */
-      #macros { top: 60px; left: 60px; width: 320px; display: none; }
+      #macros { top: 60px; left: 60px; width: min(560px, calc(100vw - 80px)); max-height: calc(100vh - 100px); overflow-y: auto; display: none; }
       #macros.on { display: block; }
       #mc-list { max-height: 40vh; overflow-y: auto; margin-bottom: 8px; }
       .mc-empty { color: #6b7280; padding: 6px 2px; font-size: 12px; }
@@ -1161,7 +1161,7 @@
       .mc-combo { flex: none; min-width: 80px; color: #ffd98a; font-size: 12px; }
       .mc-act { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
         white-space: nowrap; color: #c7d0dc; font-size: 12px; }
-      .mc-del { flex: none; cursor: pointer; color: #b6bcc6; border-radius: 3px; padding: 0 5px; }
+      .mc-del { flex: none; cursor: pointer; color: #b6bcc6; background: #202833; border: 1px solid #3b4655; font: inherit; font-size: 11px; border-radius: 3px; padding: 2px 5px; }
       .mc-del:hover { background: rgba(229, 72, 77, .25); color: #fff; }
       #mc-add { border-top: 1px solid #2a2f37; padding-top: 8px; }
       .mc-frow { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
@@ -1750,15 +1750,21 @@
         <span class="gump-close" id="mc-close">✕</span>
       </div>
       <div class="gump-body">
+        <p class="mc-empty">Choose a preset, or capture a key and build your own sequence. Edit a binding to change it.</p>
+        <div class="mc-frow"><select id="mc-preset" class="mc-input" aria-label="Hotkey preset"><option value="mage">Arena mage</option><option value="warrior">Arena warrior</option></select><button id="mc-preset-apply" type="button" class="mc-del">Add free hotkeys</button></div>
+        <p id="mc-preset-preview" class="mc-empty"></p>
+        <input id="mc-search" class="mc-input" type="search" placeholder="Search name, key or action…" aria-label="Search hotkeys" style="width:100%;box-sizing:border-box" />
         <div id="mc-list"></div>
+        <button id="mc-backup" type="button" class="mc-btn">Back up / restore settings and hotkeys</button>
         <div id="mc-add">
+          <div class="mc-frow"><label for="mc-name" class="mc-lbl">Name</label><input id="mc-name" class="mc-input" maxlength="64" placeholder="e.g. Emergency heal" /></div>
           <div class="mc-frow">
-            <label class="mc-lbl">Key</label>
+            <label for="mc-key" class="mc-lbl">Key</label>
             <input id="mc-key" class="mc-input" type="text" readonly
                    placeholder="click, then press a key / mouse button / wheel…" />
           </div>
           <div class="mc-frow">
-            <label class="mc-lbl">Action</label>
+            <label for="mc-type" class="mc-lbl">Action</label>
             <!-- Options are generated from MACRO_VERBS (js/13-macros.js) so the
                  verb list lives in exactly one place. -->
             <select id="mc-type" class="mc-input"></select>
@@ -1770,9 +1776,10 @@
           <!-- Steps staged so far. Empty until "Add step" is used, so binding a
                single action is still one click on "Add macro". -->
           <div id="mc-steps"></div>
-          <div id="mc-msg" class="mc-msg"></div>
+          <div id="mc-msg" class="mc-msg" role="status" aria-live="polite"></div>
           <button id="mc-step-btn" class="mc-btn">Add step</button>
           <button id="mc-add-btn" class="mc-btn">Add macro</button>
+          <button id="mc-cancel-btn" class="mc-btn" hidden>Cancel changes</button>
         </div>
       </div>
     </div>
