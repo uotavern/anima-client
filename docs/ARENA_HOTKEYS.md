@@ -24,7 +24,10 @@ spell packet; the server decides timing, legality, mana and reagent costs.
 Warrior defaults: F1 bandage self; F2 attack last; F3 last weapon; F4 last target;
 F5 heal potion; F6 cure potion; F7 refresh potion; F8 Arena menu. Potion hotkeys
 search the player's backpack. Arena ranked matches forbid potions; these keys
-work in the server's potion-enabled practice AI queue and ordinary shard play.
+work in the server's potion-enabled participant practice queue and ordinary shard play.
 
 The Arena menu is a standard server gump and works in ClassicUO too. These Anima
 presets do not change ClassicUO's own macro editor or client protocol.
+
+The arena pairs participant-run agents. The server supplies rings, matchmaking,
+refereeing and rankings; it does not run an opponent agent for you.
