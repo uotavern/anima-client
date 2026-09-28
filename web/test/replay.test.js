@@ -155,3 +155,16 @@ test('replay outcome uses recorded winner and distinguishes interrupted games an
   ctx.run('result.end.aborted=null; result.end.winner=0');
   eq(ctx.run('replayOutcome(result).title'),'Draw');
 });
+
+test('thrown potion remains opaque through flight and expires at recorded landing', () => {
+  const ctx = newContext({search:'?replay=1'}).loadAll();
+  ctx.run(`world=new PIXI.Container(); texFor=()=>({width:32,height:32});
+    spawnEffect({kind:0,g:0xf0d,sx:10,sy:10,sz:0,tx:16,ty:10,tz:0,speed:7,travelMs:1028},1000);
+    drawEffects(2000);`);
+  eq(ctx.run('fxEffects[0].sprite.alpha'),1);
+  eq(ctx.run('fxEffects[0].totalMs'),1028);
+  ok(ctx.run('fxEffects[0].sprite.visible'));
+  ctx.run('drawEffects(2028)'); eq(ctx.run('fxEffects.length'),0);
+  ctx.run(`spawnEffect({kind:0,g:0x379f,sx:10,sy:10,sz:0,tx:16,ty:10,tz:0,speed:7,travelMs:1000},3000);drawEffects(3900);`);
+  ok(ctx.run('fxEffects[0].sprite.alpha < 1'));
+});

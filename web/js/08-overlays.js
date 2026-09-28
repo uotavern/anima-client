@@ -516,6 +516,7 @@ function effectTextureUrl(g, kind, hue) {
 function spawnEffect(ev, now) {
   let frames = (ev.frames && ev.frames.length) ? ev.frames : [ev.g | 0];
   const hue = ev.hue | 0;
+  const thrownPotion = (ev.kind | 0) === 0 && (ev.g | 0) === 0x0f0d;
   // animdata interval is a small tick count; clamp to a lively per-frame range.
   let fm = (ev.interval | 0) > 0 ? Math.min(150, Math.max(50, (ev.interval | 0) * 50)) : 80;
   // Lightning (kind 1) has no ART animation — its graphic arrives as 0. ClassicUO
@@ -560,10 +561,13 @@ function spawnEffect(ev, now) {
     const dy = isoY(tgtPos.x, tgtPos.y, tgtPos.z | 0) - isoY(srcPos.x, srcPos.y, srcPos.z | 0);
     sprite.rotation = Math.atan2(-dy, -dx);
   }
+  // This tiny bottle must remain readable against the terrain in web replays.
+  // Keep recorded trajectory/timing; enlarge only its presentation, not other missiles.
+  if (REPLAY_MODE && thrownPotion) sprite.scale.set(1.75);
   fxAdd(sprite);
   sprite.zIndex = fxDepthZ(srcPos.x, srcPos.y, srcPos.z | 0); // until drawEffects runs
   fxEffects.push({ kind: ev.kind | 0, src: ev.src >>> 0, tgt: ev.tgt >>> 0,
-    frames, fm, hue, born: now, totalMs, sprite, srcPos, tgtPos, pserial,
+    frames, fm, hue, born: now, totalMs, sprite, srcPos, tgtPos, pserial, thrownPotion,
     // Kept for the impact burst below; `exFrames` only arrives when it is due.
     explodes: !!ev.explodes, blend: ev.blend | 0,
     exFrames: ev.exFrames, exInterval: ev.exInterval | 0 });
@@ -581,6 +585,9 @@ function spawnDragAnim(ev, now) {
   const totalMs = Math.min(2000, Math.max(200, dist * 80));
   const sprite = new PIXI.Sprite();
   sprite.anchor.set(0.5, 1.0);
+  // This tiny bottle must remain readable against the terrain in web replays.
+  // Keep recorded trajectory/timing; enlarge only its presentation, not other missiles.
+  if (REPLAY_MODE && thrownPotion) sprite.scale.set(1.75);
   fxAdd(sprite);
   sprite.zIndex = fxDepthZ(srcPos.x, srcPos.y, srcPos.z | 0);
   fxEffects.push({
@@ -665,7 +672,7 @@ function drawEffects(now) {
     o.sprite.y = isoY(px, py, pz) - (o.kind === 0 ? HALF : 0);
     o.sprite.zIndex = fxDepthZ(px, py, pz | 0);
     const t = age / o.totalMs;
-    o.sprite.alpha = t > 0.66 ? Math.max(0, 1 - (t - 0.66) * 3) : 1; // fade out the tail
+    o.sprite.alpha = !o.thrownPotion && t > 0.66 ? Math.max(0, 1 - (t - 0.66) * 3) : 1; // fade out the tail
   }
 }
 
