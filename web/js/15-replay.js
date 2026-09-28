@@ -355,6 +355,44 @@ async function replaySetupLike(id) {
   } catch(e){status.textContent=e.message;}
   show();
 }
+function replayTimestamp(value, duration) {
+  const seconds=Number(value);
+  return Number.isFinite(seconds) && seconds>=0 ? Math.min(duration,seconds*1000) : 0;
+}
+function replaySetupReport(id) {
+  const controls=document.getElementById('replay-controls');
+  const report=document.createElement('button');report.textContent='Report this moment';report.type='button';
+  const share=document.createElement('button');share.textContent='Copy moment link';share.type='button';
+  const status=document.createElement('span');status.setAttribute('role','status');
+  const dialog=document.createElement('dialog');dialog.id='replay-report-dialog';
+  dialog.innerHTML='<form><h2>Report a replay moment</h2><p class="report-moment"></p><label>Category <select name="category"><option value="spell">Spell</option><option value="potion">Potion</option><option value="resources">HP / mana / stamina</option><option value="movement">Movement</option><option value="rules">Duel rules</option><option value="replay">Replay display</option><option value="other">Other</option></select></label><label>What happened? <textarea name="description" required minlength="10" maxlength="2000" rows="4" placeholder="What did you expect, and what happened? Do not include passwords or other private information."></textarea></label><p>Saved privately for the arena operator, with the match and timestamp. Up to 5 reports per day. Kept for up to 90 days.</p><button type="submit">Send report</button><button type="button" class="report-cancel">Cancel</button><p class="report-status" role="status"></p></form>';
+  controls.append(report,share,status,dialog);
+  const style=document.createElement('style');style.textContent='#replay-report-dialog{width:min(540px,85vw);max-height:80vh;overflow:auto;background:#17202b;color:#eee;border:1px solid #c59e56;border-radius:10px;padding:20px}#replay-report-dialog::backdrop{background:#0009}#replay-report-dialog label{display:block;margin:12px 0}#replay-report-dialog textarea{display:block;width:100%;box-sizing:border-box;margin-top:8px}#replay-report-dialog p{font-size:13px}';document.head.append(style);
+  let atMs=0,pending=false;
+  report.onclick=()=>{
+    if(!replayData)return;
+    atMs=Math.round(replayTime);replayPlaying=false;stopSoundEffects();document.getElementById('replay-play').textContent='Play';
+    dialog.querySelector('.report-moment').textContent=`Match ${id} · ${(atMs/1000).toFixed(1)} seconds`;
+    dialog.querySelector('.report-status').textContent='';dialog.showModal();
+  };
+  dialog.querySelector('.report-cancel').onclick=()=>dialog.close();
+  share.onclick=async()=>{
+    const url=new URL('/replay/',location.origin);url.searchParams.set('replay',id);url.searchParams.set('t',(replayTime/1000).toFixed(1));
+    try{await navigator.clipboard.writeText(url.href);status.textContent='Moment link copied.';}catch{status.textContent=url.href;}
+  };
+  dialog.querySelector('form').onsubmit=async e=>{
+    e.preventDefault();if(pending)return;
+    const form=e.currentTarget, button=form.querySelector('[type="submit"]'), message=form.querySelector('.report-status');
+    if(!form.reportValidity())return;
+    pending=true;button.disabled=true;message.textContent='Saving…';
+    try{
+      const res=await fetch('/replay-social/reports',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({replay:id,atMs,category:form.elements.category.value,description:form.elements.description.value})});
+      const body=await res.json();if(!res.ok || body.saved!==true)throw Error(body.error || 'Could not save the report.');
+      status.textContent=`Report saved: ${body.id}`;form.reset();dialog.close();
+    }catch(err){message.textContent=err.message;}finally{pending=false;button.disabled=false;}
+  };
+}
+
 async function replayStart() {
   document.title = 'UO Arena Replay';
   settings.sfx = true; audioMuted = false;
@@ -399,7 +437,7 @@ async function replayStart() {
     try { const base = new URL(params.get('api') || location.origin); if (!/^https?:$/.test(base.protocol)) throw new Error('Invalid API URL');
       await replayLoad(await replayFetch(new URL(`/duel/replays/${id}.jsonl`, base)));
       document.body.dataset.replayReady = 'true';
-      if (params.get('thumbnail') !== '1') void replaySetupLike(id);
+      if (params.get('thumbnail') !== '1') { void replaySetupLike(id); replaySetupReport(id); replaySeek(replayTimestamp(params.get('t'),replayData.end.t)); }
       if (params.get('thumbnail') === '1') {
         audioMuted=true;
         const action = replayData.visuals.find(e => e.kind === 1) || replayData.visuals.find(e => e.g);

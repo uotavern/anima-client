@@ -168,3 +168,12 @@ test('thrown potion remains opaque through flight and expires at recorded landin
   ctx.run(`spawnEffect({kind:0,g:0x379f,sx:10,sy:10,sz:0,tx:16,ty:10,tz:0,speed:7,travelMs:1000},3000);drawEffects(3900);`);
   ok(ctx.run('fxEffects[0].sprite.alpha < 1'));
 });
+
+test('shared replay moments clamp to the archive and reject invalid time', () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  eq(ctx.run('replayTimestamp("12.5", 20000)'),12500);
+  eq(ctx.run('replayTimestamp("999", 20000)'),20000);
+  for(const value of ['-1','NaN','Infinity','bad']) {
+    ctx.set('query',value);eq(ctx.run('replayTimestamp(query, 20000)'),0);
+  }
+});
