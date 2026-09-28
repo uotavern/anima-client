@@ -585,9 +585,6 @@ function spawnDragAnim(ev, now) {
   const totalMs = Math.min(2000, Math.max(200, dist * 80));
   const sprite = new PIXI.Sprite();
   sprite.anchor.set(0.5, 1.0);
-  // This tiny bottle must remain readable against the terrain in web replays.
-  // Keep recorded trajectory/timing; enlarge only its presentation, not other missiles.
-  if (REPLAY_MODE && thrownPotion) sprite.scale.set(1.75);
   fxAdd(sprite);
   sprite.zIndex = fxDepthZ(srcPos.x, srcPos.y, srcPos.z | 0);
   fxEffects.push({
