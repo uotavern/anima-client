@@ -53,6 +53,8 @@ async function main() {
   guardLineLayer = new PIXI.Graphics();
   app.stage.addChild(itemLayer, world, guardLineLayer, entLayer, mobs, barLayer, overLayer);
 
+  if (REPLAY_MODE) { await replayStart(); return; }
+
   if (typeof wireConnectionControls === "function") wireConnectionControls();
   poll();
   setInterval(poll, 150);

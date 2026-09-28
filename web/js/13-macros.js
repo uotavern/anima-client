@@ -1324,6 +1324,7 @@ function pushChatHistory(mode, text) {
   chatHistoryIdx = chatHistory.length;
 }
 function sendInput(cmd) {
+  if (REPLAY_MODE) return;
   if (typeof sceneReloading !== "undefined" && sceneReloading) return;
   if (typeof sceneTransportAvailable !== "undefined" && !sceneTransportAvailable) return;
   if (WASM_MODE) wasmSendInput(cmd);

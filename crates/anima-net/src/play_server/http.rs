@@ -537,6 +537,73 @@ pub(super) fn handle_request(ctx: Ctx) {
         r.add_header(Header::from_bytes("Cache-Control", "no-store").unwrap());
         r.add_header(ctype("application/json"));
         let _ = req.respond(r);
+    } else if url == "/replay-art.json" {
+        let g: u16 = raw_url
+            .split_once("?g=")
+            .and_then(|(_, v)| v.parse().ok())
+            .unwrap_or(0);
+        let (frames, interval) = terrain
+            .as_ref()
+            .and_then(|t| {
+                let state = t.lock().ok()?;
+                state
+                    .animdata
+                    .as_ref()
+                    .map(|a| (a.frame_sequence(g), a.frames(g).1))
+            })
+            .unwrap_or((vec![g], 0));
+        let flags = tiledata.as_ref().map_or(0, |t| t.item_flags(g));
+        let height = tiledata.as_ref().map_or(0, |t| t.item_height(g));
+        let mut r = Response::from_string(serde_json::json!({
+            "frames": frames, "interval": interval, "partial": flags & 0x4_0000 != 0, "height": height
+        }).to_string());
+        r.add_header(ctype("application/json"));
+        let _ = req.respond(r);
+    } else if url == "/replay-look.json" {
+        // Resolve recorded raw appearance through the same UO asset tables as play.
+        let query = raw_url.split_once('?').map_or("", |(_, q)| q);
+        let val = |key: &str| -> u16 {
+            query
+                .split('&')
+                .find_map(|part| {
+                    let (k, v) = part.split_once('=')?;
+                    (k == key).then(|| v.parse().ok()).flatten()
+                })
+                .unwrap_or(0)
+        };
+        let (raw_body, raw_hue, g) = (val("body"), val("hue"), val("g"));
+        let (body, fallback) = anim.as_ref().map_or((raw_body, 0), |a| a.remap(raw_body));
+        let mut hue = if raw_hue == 0 { fallback } else { raw_hue };
+        let at = anim.as_ref().map_or(2, |a| a.anim_type(body));
+        let dg = anim.as_ref().map_or(21, |a| a.death_group(body));
+        let mut equip_anim = tiledata.as_ref().map_or(0, |t| t.item_anim(g));
+        if g != 0 {
+            hue = raw_hue;
+            if let Some(ec) = anim.as_ref().and_then(|a| a.equip_conv(body, equip_anim)) {
+                equip_anim = ec.graphic;
+                if hue == 0 {
+                    hue = ec.hue;
+                }
+            }
+            if hue != 0
+                && tiledata
+                    .as_ref()
+                    .is_some_and(|t| t.item_flags(g) & 0x4_0000 != 0)
+            {
+                hue |= 0x8000;
+            }
+        }
+        let (mount_anim, mount_off) =
+            anima_assets::mounts::mount_body(g).unwrap_or((equip_anim, 0));
+        let mut r = Response::from_string(
+            serde_json::json!({
+                "mountAnim": mount_anim, "mountOff": mount_off,
+                "body": body, "at": at, "dg": dg, "hue": hue, "anim": equip_anim
+            })
+            .to_string(),
+        );
+        r.add_header(ctype("application/json"));
+        let _ = req.respond(r);
     } else if url == "/terrain.json" {
         serve_terrain_json(terrain, art, &raw_url, req);
     } else if url == "/sounds" {

@@ -618,7 +618,7 @@ function drawEffects(now) {
       // landed. ClassicUO does exactly this in `MovingEffect.RemoveMe` → a second
       // `FixedEffect(0x36CB, Hue, 400, 0)` at the target, inheriting the blend —
       // so the burst is our own follow-up to one packet, not a second packet.
-      if (o.kind === 0 && o.explodes && !o.drag) spawnImpactBurst(o, now);
+      if (o.kind === 0 && o.explodes && !o.drag) spawnImpactBurst(o, REPLAY_MODE ? o.born + o.totalMs : now);
       continue;
     }
 
