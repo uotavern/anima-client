@@ -2,6 +2,8 @@
 // No fake sprites, no simulation of combat outcomes, and no shard connection.
 let replayData = null, replayTime = 0, replayPlaying = false, replayRate = 1;
 let replayLastReal = 0, replayLastWorld = null, replayLastDraw = -1, replayLastSyncWall = 0;
+const replaySpeechShown = new Set(), replayStatusLabels = new Map();
+let replaySoundTime = 0;
 const replayLooks = new Map(), replayArt = new Map(), replaySpawned = new Set();
 
 function replayAt(rows, t) {
@@ -50,6 +52,7 @@ function replayParse(text) {
   }
   if ([...tracks.values()].some(t => !t.length)) throw new Error("Missing fighter positions");
   return { header, end, rows, tracks, loads: [header, ...rows.filter(r => r.type === 'loadout')],
+    speech: rows.filter(r => r.type === 'speech' && tracks.has(r.actor) && typeof r.text === 'string' && r.text.length <= 512 && [0, 2, 9, 10].includes(r.messageType)),
     worlds: rows.filter(r => r.type === 'world'), frames: rows.filter(r => r.type === 'frame'),
     visuals: rows.filter(r => r.type === 'visual').map(replayDecode) };
 }
@@ -70,7 +73,7 @@ async function replayLoadAppearance(p) {
   replayLooks.set(key, { ...body, equip: body.body >= 400 ? equip : [], mounted: mountAnim ? 1 : 0, mountAnim, mountOff });
 }
 async function replayLoad(text) {
-  replayPlaying = false;
+  replayPlaying = false; stopSoundEffects();
   const data = replayParse(text);
   replayLooks.clear(); replayArt.clear();
   for (const load of data.loads) for (const p of load.players) await replayLoadAppearance(p);
@@ -81,7 +84,7 @@ async function replayLoad(text) {
   const a = data.header.arena, f = a.floor;
   data.center = { x: f[0] + Math.floor(f[2] / 2), y: f[1] + Math.floor(f[3] / 2), z: a.z };
   data.terrain = await replayJson(`terrain.json?x=${data.center.x}&y=${data.center.y}&z=${a.z}&map=0&season=0`);
-  replayData = data; replayTime = 0; replayLastWorld = null; replayLastDraw = -1;
+  replayData = data; replayTime = 0; replaySoundTime = -1; replayLastWorld = null; replayLastDraw = -1;
   replayResetEffects(); anim.clear(); dyingMobs.clear();
   document.getElementById('replay-seek').max = String(data.end.t);
   document.getElementById('replay-title').textContent = data.header.players.map(p => p.name).join(' vs ') + ' · ' + data.header.rules;
@@ -91,9 +94,15 @@ async function replayLoad(text) {
 function replayResetEffects() {
   for (const fx of fxEffects) { if (fx.sprite) { fx.sprite.removeFromParent(); fx.sprite.destroy(); } }
   fxEffects.length = 0; replaySpawned.clear();
+  for (const o of overheads) if (o.el) o.el.remove();
+  overheads.length = 0; replaySpeechShown.clear();
+  for (const el of replayStatusLabels.values()) el.remove();
+  replayStatusLabels.clear();
 }
 function replaySeek(t) {
+  stopSoundEffects();
   replayTime = Math.max(0, Math.min(replayData?.end.t || 0, t));
+  replaySoundTime = replayTime;
   replayLastDraw = -1; replayResetEffects(); anim.clear(); dyingMobs.clear();
 }
 function replayMobile(p, identity, track) {
@@ -107,7 +116,7 @@ function replayMobile(p, identity, track) {
   const look = replayLooks.get(replayLookKey(identity));
   const next = track.find(row => row.t > replayTime && (row.pos[0] !== p.pos[0] || row.pos[1] !== p.pos[1]));
   let x = p.pos[0], y = p.pos[1], z = p.pos[2], moving = false;
-  if (!fallen && next && next.round === p.round && next.phase === p.phase && next.t - p.t <= 400 && Math.max(Math.abs(next.pos[0] - x), Math.abs(next.pos[1] - y)) <= 1) {
+  if (!fallen && !p.paralyzed && next && next.round === p.round && next.phase === p.phase && next.t - p.t <= 400 && Math.max(Math.abs(next.pos[0] - x), Math.abs(next.pos[1] - y)) <= 1) {
     const f = Math.max(0, Math.min(1, (replayTime - p.t) / (next.t - p.t || 1)));
     x += (next.pos[0] - x) * f; y += (next.pos[1] - y) * f; z += (next.pos[2] - z) * f; moving = true;
   }
@@ -125,6 +134,36 @@ function replayMobile(p, identity, track) {
   }
   if (fallen) { st.act = null; st.death = { dg: look.dg, startMs: death.t + 1000 }; }
   return m;
+}
+function replayDrawSpeech() {
+  for (const ev of replayData.speech) {
+    if (ev.t > replayTime) break;
+    if (replayTime - ev.t >= Math.min(8000, 3000 + ev.text.length * 70) || replaySpeechShown.has(ev.seq)) continue;
+    replaySpeechShown.add(ev.seq);
+    addOverhead('m' + ev.actor, ev.text, ev.messageType, ev.hue | 0, ev.t + 1000);
+  }
+  drawOverheads(replayClockMs);
+}
+function replayDrawStatus(mobiles) {
+  const fx = window.innerWidth / app.renderer.width, fy = window.innerHeight / app.renderer.height;
+  for (const m of mobiles) {
+    let el = replayStatusLabels.get(m.serial);
+    const label = m.alive ? [m.paralyzed ? 'PARALYZED' : '', m.poisoned ? 'POISONED' : ''].filter(Boolean).join(' · ') : '';
+    if (!label) { if (el) el.remove(); replayStatusLabels.delete(m.serial); continue; }
+    if (!el) { el = document.createElement('div'); el.className = 'nm-label'; namesEl().appendChild(el); replayStatusLabels.set(m.serial, el); }
+    el.textContent = label; el.style.color = m.paralyzed ? '#ffe16a' : '#54ed70';
+    el.style.left = ((app.stage.x + isoX(m.x, m.y) * camZoom) * fx) + 'px';
+    el.style.top = ((app.stage.y + (isoY(m.x, m.y, m.z) + 25) * camZoom) * fy) + 'px';
+  }
+}
+function replayPlaySounds() {
+  if (!replayPlaying) return;
+  for (const ev of replayData.visuals) {
+    if (ev.sound !== undefined && ev.t > replaySoundTime && ev.t <= replayTime) playSfx(ev.sound, ev.x, ev.y);
+    // Warm a short lookahead without playing anything while paused/seeking.
+    if (ev.sound !== undefined && ev.t > replayTime && ev.t <= replayTime + 2000) loadSfx(ev.sound);
+  }
+  replaySoundTime = replayTime;
 }
 function replayDraw() {
   if (!replayData) return;
@@ -161,6 +200,7 @@ function replayDraw() {
   app.stage.position.set(app.screen.width / 2 - isoX(data.center.x, data.center.y) * camZoom,
     app.screen.height / 2 - isoY(data.center.x, data.center.y, data.center.z) * camZoom);
   tickAnimatedStatics(replayClockMs); drawMobs(); drawEffects(replayClockMs); drawBars(replayClockMs);
+  replayDrawSpeech(); replayDrawStatus(mobiles); replayPlaySounds();
   app.render(); replayLastDraw = replayTime;
   const frame = replayAt(data.frames, replayTime);
   document.getElementById('replay-seek').value = String(Math.round(replayTime));
@@ -178,29 +218,31 @@ async function replayFetch(url) {
 }
 async function replayStart() {
   document.title = 'UO Arena Replay';
+  settings.sfx = true; audioMuted = false;
   const style = document.createElement('style');
   style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
   document.head.appendChild(style);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
-  ui.innerHTML = '<div id="replay-title">UO Arena Replay — open a server recording</div><button id="replay-play">Play</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><label> Open recording <input id="replay-file" type="file" accept=".jsonl,.ndjson"></label><div id="replay-error" role="alert"></div>';
+  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play">Play</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><button id="replay-sound">Sound on</button><div id="replay-error" role="alert"></div>';
   document.body.appendChild(ui);
   const error = e => { document.getElementById('replay-error').textContent = e.message; console.error(e); };
   document.getElementById('replay-play').onclick = () => {
     if (!replayData) return;
     if (replayTime >= replayData.end.t) replaySeek(0);
-    replayPlaying = !replayPlaying; document.getElementById('replay-play').textContent = replayPlaying ? 'Pause' : 'Play';
+    replayPlaying = !replayPlaying; if (!replayPlaying) stopSoundEffects(); else unlockAudio(); document.getElementById('replay-play').textContent = replayPlaying ? 'Pause' : 'Play';
   };
   document.getElementById('replay-speed').onchange = e => { replayRate = Number(e.target.value); };
   document.getElementById('replay-seek').oninput = e => replaySeek(Number(e.target.value));
-  document.getElementById('replay-file').onchange = async e => {
-    try { const f = e.target.files[0]; if (f.size > 34 * 1024 * 1024) throw new Error('Replay is too large'); await replayLoad(await f.text()); } catch (err) { error(err); }
+  document.getElementById('replay-sound').onclick = () => {
+    audioMuted = !audioMuted; if (audioMuted) stopSoundEffects(); else unlockAudio();
+    document.getElementById('replay-sound').textContent = audioMuted ? 'Sound off' : 'Sound on';
   };
   let lastPaint = 0;
   function tick(real) {
     const dt = replayLastReal ? Math.min(100, real - replayLastReal) : 0; replayLastReal = real;
     if (replayPlaying && replayData) {
       replayTime = Math.min(replayData.end.t, replayTime + dt * replayRate);
-      if (replayTime >= replayData.end.t) { replayPlaying = false; document.getElementById('replay-play').textContent = 'Play'; }
+      if (replayTime >= replayData.end.t) { replayPlaying = false; stopSoundEffects(); document.getElementById('replay-play').textContent = 'Play'; }
     }
     if (real - lastPaint >= 30) { try { replayDraw(); } catch (err) { replayPlaying = false; error(err); } lastPaint = real; }
     requestAnimationFrame(tick);
