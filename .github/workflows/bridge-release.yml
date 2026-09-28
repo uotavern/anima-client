@@ -42,8 +42,8 @@ jobs:
         include:
           # 22.04's glibc keeps the Linux binary runnable on older distributions.
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, archive: tar.gz }
-          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
-          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz, sign: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz, sign: true }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
     runs-on: ${{ matrix.os }}
     steps:
@@ -58,6 +58,67 @@ jobs:
       - name: Build anima-bridge
         shell: bash
         run: cargo build --release --locked -p anima-session --bin anima-bridge --target ${{ matrix.target }}
+      # macOS: Developer ID signature with the hardened runtime and a secure
+      # timestamp, then Apple notarization. The same secrets as the desktop app's
+      # release.yml; a bridge release refuses to ship macOS binaries without both.
+      - name: Configure Apple signing
+        if: matrix.sign
+        id: apple
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          python3 scripts/apple-signing.py
+          grep -q '^signing=notarized$' "$GITHUB_OUTPUT" || { echo "::error::bridge releases need Developer ID signing and notarization secrets"; exit 1; }
+      - name: Sign with Developer ID
+        if: matrix.sign
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          set -eu
+          keychain="$RUNNER_TEMP/bridge-signing.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/bridge-cert.p12"
+          security import "$RUNNER_TEMP/bridge-cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/bridge-cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          bin="target/${{ matrix.target }}/release/anima-bridge"
+          codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$APPLE_SIGNING_IDENTITY" "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
+          codesign -dv --verbose=4 "$bin" 2>&1 | grep -E '^(Authority=Developer ID Application|Runtime Version|Timestamp)'
+          codesign -dv --verbose=4 "$bin" 2>&1 | grep -q '^Authority=Developer ID Application:'
+          codesign -dv --verbose=4 "$bin" 2>&1 | grep -q 'flags=.*runtime'
+      - name: Notarize
+        if: matrix.sign
+        run: |
+          set -eu
+          bin="target/${{ matrix.target }}/release/anima-bridge"
+          # A bare Mach-O can't be stapled: Gatekeeper fetches its ticket online.
+          ditto -c -k --keepParent "$bin" "$RUNNER_TEMP/anima-bridge-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/anima-bridge-notarize.zip" \
+            --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+            --wait --output-format json > "$RUNNER_TEMP/notary.json"
+          cat "$RUNNER_TEMP/notary.json"
+          status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/notary.json")
+          if [ "$status" != Accepted ]; then
+            id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$RUNNER_TEMP/notary.json")
+            xcrun notarytool log "$id" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" || true
+            echo "::error::notarization $status"; exit 1
+          fi
+      - name: Remove signing keychain and notarization key
+        if: always() && matrix.sign
+        run: |
+          security delete-keychain "$RUNNER_TEMP/bridge-signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/anima-notary/AuthKey.p8" "$RUNNER_TEMP/bridge-cert.p12"
       - name: Package
         shell: bash
         run: |
@@ -120,8 +181,8 @@ jobs:
           [\`crates/anima-session/src/bridge.rs\`](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/crates/anima-session/src/bridge.rs).
           Check downloads against \`SHA256SUMS\`.
 
-          The macOS binaries are not notarized: if macOS blocks a browser download, run
-          \`xattr -d com.apple.quarantine anima-bridge\` once. Downloads made with \`curl\` are not affected.
+          The macOS binaries are signed with a Developer ID (hardened runtime) and notarized by Apple.
+          A bare command-line binary can't carry a stapled ticket, so the first run checks it online.
           EOF
           gh release create "$TAG" dist/* \
             --title "anima-bridge ${version}" \
