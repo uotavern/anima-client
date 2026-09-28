@@ -80,17 +80,18 @@ all drive the same character through the same core.
 
 This project is **core-first**: a headless game core (`anima-core`) is the primary
 artifact, and the human-facing renderer is just *one* front-end among several.
-The same core powers AI agents, a browser client, and a desktop app.
+The same core powers AI agents and the desktop app.
 
 ```
                   anima-core  (Rust — the headless heart)
                   net · world · assets · path     (NO rendering/UI/audio)
-        ┌──────────────────┼──────────────────────┐
-   native lib            WASM                  Tauri backend (native)
-        ▼                  ▼                        ▼
-   AI agents          browser client          desktop standalone
-   (many, headless)   (anima-core = WASM       (Tauri: direct TCP,
-                       + WebSocket relay)       reads local UO data)
+                                 │
+                  anima-session  (Session: TCP driver, pathing, NDJSON bridge)
+              ┌──────────────────┴──────────────────────┐
+         anima-bridge                        anima-net play server + Tauri
+              ▼                                           ▼
+         AI agents                             desktop standalone
+   (any language, headless)          (direct TCP, reads local UO data)
 ```
 
 Cross-platform concern is isolated to the thin **renderer** layer; the core is
@@ -98,11 +99,11 @@ pure logic and platform-agnostic.
 
 ## Stack
 
-- **Core:** Rust `anima-core` → native (agents, desktop) + WASM (browser)
+- **Core:** Rust `anima-core` (sans-IO) → native agents and the desktop app
 - **Renderer / UI:** plain JavaScript + PixiJS (2D isometric), WebGPU with WebGL2 fallback
-- **Networking:** desktop = direct TCP (Tauri/Rust); browser = thin WebSocket↔TCP relay
-  - (browsers can't open raw TCP — this constraint drives the desktop/relay split)
-- **Packaging:** Tauri for standalone Win/Mac desktop; PWA/web for zero-install
+- **Networking:** direct TCP from Rust (desktop app, bridge). The browser-only WASM
+  client and its WebSocket relay were removed on 2026-09-29.
+- **Packaging:** Tauri for standalone Win/Mac desktop
 
 ## Layout
 
@@ -117,7 +118,6 @@ anima-client/
 │   ├── anima-assets/          # .mul/.uop readers: map/tiledata/anim/art/gump/hues/sound/…
 │   ├── anima-contract-json/   # shared versioned Observation/Action JSON adapter
 │   ├── anima-net/             # UI layer on anima-session + `anima-login`/`play`/`anima-agent`/`cmd` bins
-│   ├── anima-wasm/            # wasm-bindgen wrapper: WasmClient (feed bytes → Observation JSON)
 │   ├── anima-agent/           # in-process autonomous brains (Brain trait, WanderBrain); bin `anima-brain`
 │   └── anima-desktop/         # Tauri standalone shell (native TCP + embedded web renderer)
 └── web/                       # plain JavaScript + PixiJS renderer (outside the Cargo workspace)
@@ -129,7 +129,7 @@ anima-client/
 isometric sprites, resolved mobile and monster animation (legacy + UOP), gumps
 (paperdoll, containers, vendors, spellbook, books, party), audio, secure
 trading, macros, name plates, and a world map. An **autonomous brain** consumes
-the same `Observation` and plays live. `anima-core` also compiles to **WASM**.
+the same `Observation` and plays live.
 
 Latest release: **[v0.6.0](https://github.com/hulryung-uo/anima-client/releases/latest)**
 — signed and notarized on macOS, installable on Windows.
@@ -140,7 +140,7 @@ a live ServUO shard;
 including — deliberately — what each change was **not** verified against.
 
 Quality gates run in CI on every push: `cargo clippy --all-targets -D warnings`,
-the workspace tests, a wasm32 check, and two that exist because of specific
+the workspace tests, and two that exist because of specific
 bugs that shipped — one compiles every `web/js` file *together* in the page's
 real load order (they share one scope, and a duplicate top-level `const` is a
 SyntaxError that kills the client while `node --check` passes it), and one
@@ -149,8 +149,8 @@ SyntaxError that kills the client while `node --check` passes it), and one
 ### Roadmap
 1. ✅ **Phase 1 — headless core:** protocol, world, perception, movement, assets,
    A\* pathfinding, Observation/Action contract.
-2. ✅ **Phase 2 — renderer + WASM:** `anima-core`→wasm32, `anima-wasm`, live PixiJS
-   renderer fed by the scene bridge.
+2. ✅ **Phase 2 — renderer:** live PixiJS renderer fed by the scene JSON. (It also
+   shipped a browser WASM client, removed on 2026-09-29 as unused.)
 3. ✅ **Phase 3 — AI + real art + human-playable polish:** brains play
    autonomously on the contract; the `play` server is a full human-playable
    client.
@@ -192,10 +192,6 @@ deleted from the same list after an explicit irreversible-action confirmation;
 the refreshed server list is displayed before any subsequent choice. **Back**
 cancels the pending game-server connection and restores the account form.
 
-WASM module: `cargo install wasm-pack && wasm-pack build crates/anima-wasm --target web`.
-Browser transport: `cargo run -p anima-relay -- 127.0.0.1:2595 127.0.0.1:2594`
-bridges a WebSocket to the shard's raw TCP (browsers cannot open sockets). It
-only dials targets named on its command line — never one the client picks.
 ClassicUO compatibility work is tracked in
 [`docs/CLASSICUO_GAPS.md`](docs/CLASSICUO_GAPS.md).
 

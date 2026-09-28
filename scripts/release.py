@@ -122,11 +122,14 @@ def verify_build(repository, run_id, commit):
         raise ValueError("The completed release workflow must match the tagged source commit.")
     jobs = json.loads(subprocess.check_output(["gh", "api", endpoint + "/jobs?per_page=100"], text=True))["jobs"]
     required = {"Validate release tag and notes", "Bundle (macos)", "Bundle (windows)",
-                "Verify the release commit / Rust, WASM, and web quality gates",
                 "Verify the release commit / Desktop compile (macos-latest)",
                 "Verify the release commit / Desktop compile (windows-latest)"}
+    # The quality-gate job lost "WASM" from its name when the browser build was
+    # removed (2026-09-29); runs from earlier releases carry the old name.
+    gates = {"Verify the release commit / Rust and web quality gates",
+             "Verify the release commit / Rust, WASM, and web quality gates"}
     successful = {job["name"] for job in jobs if job["conclusion"] == "success"}
-    if not required.issubset(successful):
+    if not required.issubset(successful) or not gates & successful:
         raise ValueError("Both builds and all quality gates must have passed before draft assembly can be retried.")
 
 

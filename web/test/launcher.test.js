@@ -10,6 +10,14 @@ function profiles() {
     { id: "b", server_id: "two", username: "crafter", label: "Crafter", remember_password: false, characters: [], last_used: null },
   ] };
 }
+// The worlds-backup shape the native export produces, built from the fixture profiles.
+function backupOf(data) {
+  return { format: "anima-worlds", version: 1, servers: data.servers.map(s => ({
+    name: s.name, host: s.host, port: s.port, shard: s.shard, notes: s.notes || "",
+    accounts: data.accounts.filter(a => a.server_id === s.id).map(a => ({ label: a.label, username: a.username })),
+  })) };
+}
+
 async function setup() {
   const ctx = newContext(); ctx.mountPage(); ctx.load("00-state.js", "04-launcher.js");
   const state = profiles(), calls = [];
@@ -88,18 +96,10 @@ test("character selection clears the transient password and displays the next st
   eq(el("lg-pass").value, ""); ok(el("lg-shell").classList.contains("character-stage"));
   ctx.run('launcherOnAuth("login", [])'); ok(!el("lg-shell").classList.contains("character-stage"));
 });
-test("browser profile serialization excludes a supplied password", () => {
-  const ctx = newContext(); ctx.mountPage(); ctx.load("00-state.js", "04-launcher.js");
-  ctx.run('launcherData = {servers:[],accounts:[],passwords:false,persistent:true}');
-  ctx.run('launcherData = launcherBrowserCommand({op:"save_server",id:"s",name:"World",host:"localhost",port:2594,shard:0,notes:""})');
-  ctx.run('launcherData = launcherBrowserCommand({op:"save_account",id:"a",server_id:"s",label:"Main",username:"player",password:"never-persist",remember_password:false})');
-  ok(!ctx.localStorage.getItem("anima.launcher.browser.v1").includes("never-persist"));
-  eq(ctx.run("launcherData.accounts.length"), 1);
-});
-
 test("worlds backup preview is read-only and import preserves the active saved account", async () => {
   const { ctx, el, calls, state } = await setup();
-  ctx.run('launcherPreviewWorlds(JSON.stringify(launcherBackupFrom(launcherData)), "travel.json")');
+  ctx.set("fixtureBackup", backupOf(ctx.get("launcherData")));
+  ctx.run('launcherPreviewWorlds(JSON.stringify(fixtureBackup), "travel.json")');
   includes(el("lg-worlds-summary").textContent, "2 servers · 2 accounts");
   ok(!el("lg-worlds-preview").hidden); eq(calls.length, 1, "preview sends no profile command");
   const commands = [];
@@ -118,7 +118,7 @@ test("worlds backup preview is read-only and import preserves the active saved a
 });
 test("malformed, future and password-bearing backups cannot be applied", async () => {
   const { ctx, el, calls } = await setup();
-  const valid = ctx.run("launcherBackupFrom(launcherData)");
+  const valid = backupOf(ctx.get("launcherData"));
   for (const text of ["{broken", JSON.stringify({ ...valid, version: 99 }), JSON.stringify({ ...valid, password: "nope" }), JSON.stringify({ ...valid, servers: [{ ...valid.servers[0], accounts: [{ label: "bad", username: "a", password: "nope" }] }] })]) {
     ctx.set("fixtureBackupText", text); ctx.run('launcherPreviewWorlds(fixtureBackupText, "broken.json")');
     ok(el("lg-import-worlds").disabled); ok(el("lg-worlds-preview").hidden);
@@ -128,7 +128,7 @@ test("malformed, future and password-bearing backups cannot be applied", async (
 });
 test("worlds export uses its own download and ignores unrelated download results", async () => {
   const { ctx, el } = await setup();
-  const exported = ctx.run("launcherBackupFrom(launcherData)");
+  const exported = backupOf(ctx.get("launcherData"));
   const commands = [];
   ctx.setFetch((url, init) => { commands.push(JSON.parse(init.body)); return { ok: true, json: async () => clone(exported) }; });
   el("lg-pass").value = "unsaved-secret";
@@ -157,43 +157,6 @@ test("unreadable profiles expose recovery while allowing renderer settings repai
   deepEq(commands, [{ op: "recover" }]); ok(ctx.run("launcherReady"));
   ok(el("lg-recover-worlds").hidden); includes(el("lg-worlds-message").textContent, "/isolated/launcher.recovered.json");
 });
-test("browser backup merge preserves named aliases, newer profiles and failed writes", async () => {
-  const { ctx } = await setup();
-  const data = profiles(); data.version = 1;
-  ctx.localStorage.setItem("anima.launcher.browser.v1", JSON.stringify(data));
-  const backup = ctx.run("launcherBackupFrom(launcherData)");
-  backup.servers[0].notes = "old notes";
-  backup.servers[0].accounts.push({ username: "second-player", label: "Second" });
-  backup.servers.push({ ...clone(backup.servers[0]), name: "Same address, different group" });
-  ctx.set("fixtureWorldsBackup", backup);
-  const merged = ctx.run("launcherMergeBrowser(fixtureWorldsBackup)");
-  eq(merged.servers.length, 3); eq(merged.servers[0].notes, "Friends");
-  eq(merged.accounts.filter(a => a.username === "second-player").length, 2);
-  eq(merged.accounts.filter(a => a.username === "second-player")[0].remember_password, false);
-  const before = ctx.localStorage.getItem("anima.launcher.browser.v1");
-  ctx.localStorage.setItem = () => { throw new Error("Quota exceeded"); };
-  let failed = false; try { ctx.run("launcherMergeBrowser(fixtureWorldsBackup)"); } catch (_) { failed = true; }
-  ok(failed); eq(ctx.localStorage.getItem("anima.launcher.browser.v1"), before);
-});
-
-test("browser recovery keeps exact originals and stops if the recovery copy cannot be saved", async () => {
-  const ctx = newContext({ href: "http://127.0.0.1:8090/?wasm=1" }); ctx.mountPage(); ctx.load("00-state.js", "04-launcher.js");
-  const key = "anima.launcher.browser.v1", original = "{original broken JSON\n";
-  ctx.localStorage.setItem(key, original);
-  ctx.run("initLauncher()"); await ctx.run("launcherInitPromise");
-  ok(ctx.run("launcherRecoverable")); ok(!ctx.run("launcherReady"));
-  const save = ctx.localStorage.setItem;
-  ctx.localStorage.setItem = () => { throw new Error("Quota exceeded"); };
-  await ctx.run("launcherRecoverWorlds()");
-  eq(ctx.localStorage.getItem(key), original); ok(!ctx.run("launcherReady"));
-  ctx.localStorage.setItem = save;
-  await ctx.run("launcherRecoverWorlds()");
-  ok(ctx.run("launcherReady"));
-  const copy = Array.from({ length: ctx.localStorage.length }, (_, i) => ctx.localStorage.key(i)).find(k => k.startsWith(key + ".recovered-"));
-  ok(copy); eq(ctx.localStorage.getItem(copy), original);
-  deepEq(JSON.parse(ctx.localStorage.getItem(key)), { version: 1, servers: [], accounts: [] });
-});
-
 test("a cancelled asynchronous file read cannot reopen an import preview", async () => {
   const { ctx, el } = await setup();
   let complete;
@@ -202,18 +165,8 @@ test("a cancelled asynchronous file read cannot reopen an import preview", async
   ctx.fire(el("lg-worlds-file"), "change");
   ok(!el("lg-cancel-worlds").hidden, "cancel stays available while the file is being read");
   ctx.fire(el("lg-cancel-worlds"), "click");
-  complete(JSON.stringify(ctx.run("launcherBackupFrom(launcherData)"))); await ctx.flush();
+  complete(JSON.stringify(backupOf(ctx.get("launcherData")))); await ctx.flush();
   ok(el("lg-worlds-preview").hidden); eq(ctx.run("launcherWorldsPreview"), null);
-});
-
-test("browser corruption after login initialization makes recovery available without overwriting it", async () => {
-  const ctx = newContext({ href: "http://127.0.0.1:8090/?wasm=1" }); ctx.mountPage(); ctx.load("00-state.js", "04-launcher.js");
-  ctx.run("initLauncher()"); await ctx.run("launcherInitPromise"); ok(ctx.run("launcherReady"));
-  ctx.localStorage.setItem("anima.launcher.browser.v1", "broken by another window");
-  await ctx.run("launcherExportWorlds()");
-  ok(!ctx.run("launcherReady")); ok(ctx.run("launcherRecoverable"));
-  ok(!ctx.document.getElementById("lg-recover-worlds").disabled);
-  eq(ctx.localStorage.getItem("anima.launcher.browser.v1"), "broken by another window");
 });
 
 test("saved-server login keeps management folded; adding a server exposes its address", async () => {
@@ -281,54 +234,3 @@ test("an incoming character session dismisses a pending save choice without writ
   eq(calls.filter(c => c.init.body).length, 0);
 });
 
-async function browserLoginSetup() {
-  const ctx = newContext({ href: "http://127.0.0.1:8090/?wasm=1" });
-  ctx.mountPage(); ctx.load("00-state.js", "04-launcher.js");
-  const state = profiles();
-  state.servers.forEach(s => { s.relay = "ws://127.0.0.1:2595/relay?target=" + s.id; });
-  state.accounts.forEach(a => { a.remember_password = false; });
-  ctx.localStorage.setItem("anima.launcher.browser.v1", JSON.stringify({ version: 1, servers: state.servers, accounts: state.accounts }));
-  ctx.localStorage.setItem("anima.launcher.selection.v1", JSON.stringify({ server: "one", accounts: { one: "a" } }));
-  ctx.run("initLauncher()"); await ctx.run("launcherInitPromise");
-  return { ctx, el: id => ctx.document.getElementById(id), saved: () => ctx.localStorage.getItem("anima.launcher.browser.v1") };
-}
-
-test("one-time browser login cannot cache new characters under the previously selected account", async () => {
-  const { ctx, el, saved } = await browserLoginSetup(); const before = saved();
-  el("lg-user").value = "temporary-account";
-  const pending = ctx.run("launcherPrepareLogin()"); await ctx.flush(); el("lg-connect-once").click(); await pending;
-  ctx.run('launcherOnAuth("connecting"); launcherOnAuth("characters", [{index:0,name:"Different account hero"}])');
-  eq(saved(), before);
-});
-
-test("browser character caching follows the login binding and preserves concurrent profile edits", async () => {
-  const { ctx, saved } = await browserLoginSetup();
-  await ctx.run("launcherPrepareLogin()");
-  const latest = JSON.parse(saved()); latest.servers[1].notes = "Changed in another window";
-  ctx.localStorage.setItem("anima.launcher.browser.v1", JSON.stringify(latest));
-  ctx.run('launcherSelectServer("two"); launcherOnAuth("characters", [{index:0,name:"Home hero"}])');
-  const updated = JSON.parse(saved());
-  deepEq(updated.accounts.find(a => a.id === "a").characters, [{index:0,name:"Home hero"}]);
-  deepEq(updated.accounts.find(a => a.id === "b").characters, []);
-  eq(updated.servers[1].notes, "Changed in another window");
-});
-
-test("a changed browser relay cannot reuse the saved account's character-cache binding", async () => {
-  const { ctx, el, saved } = await browserLoginSetup(); const before = saved();
-  el("lg-relay").value = "ws://127.0.0.1:2595/relay?target=other";
-  const pending = ctx.run("launcherPrepareLogin()"); await ctx.flush(); el("lg-connect-once").click(); await pending;
-  ctx.run('launcherOnAuth("characters", [{index:0,name:"Other world hero"}])');
-  eq(saved(), before);
-});
-
-test("late browser characters do not overwrite a changed endpoint or corrupt profile file", async () => {
-  for (const corrupt of [false, true]) {
-    const { ctx, saved } = await browserLoginSetup(); await ctx.run("launcherPrepareLogin()");
-    const latest = JSON.parse(saved()); latest.servers[0].port = 2600;
-    const original = corrupt ? "broken in another window" : JSON.stringify(latest);
-    ctx.localStorage.setItem("anima.launcher.browser.v1", original);
-    ctx.run('launcherOnAuth("characters", [{index:0,name:"Stale hero"}])');
-    eq(saved(), original);
-    if (corrupt) ok(ctx.run("launcherRecoverable"));
-  }
-});

@@ -26,7 +26,7 @@ test("every script index.html loads, runs", () => {
   // Spot-check that state from the FIRST file and the LAST are in one scope —
   // this is the shared-global-scope property check-web-globals.mjs guards.
   eq(typeof ctx.get("dialogFamilies"), "object", "dialogs.js ran");
-  eq(typeof ctx.get("wasmDeleteSlot"), "function", "14-wasm.js ran");
+  eq(ctx.loaded[ctx.loaded.length - 1], "js/99-start.js", "the entry-point script loads last");
   ok(ctx.get("dialogFamilies").length > 0, "09-gumps.js registered dialog families into dialogs.js's list");
 });
 

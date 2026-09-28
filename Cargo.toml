@@ -6,10 +6,8 @@ members = [
     "crates/anima-session",
     "crates/anima-net",
     "crates/anima-assets",
-    "crates/anima-wasm",
     "crates/anima-agent",
     "crates/anima-desktop",
-    "crates/anima-relay",
 ]
 # `cargo build`/`cargo test` (no --workspace) only touch these — keeps the
 # everyday inner loop fast. `anima-desktop` pulls in Tauri (a long first
@@ -21,13 +19,11 @@ default-members = [
     "crates/anima-session",
     "crates/anima-net",
     "crates/anima-assets",
-    "crates/anima-wasm",
     "crates/anima-agent",
-    "crates/anima-relay",
 ]
 
 # The web frontend (TypeScript + PixiJS) lives outside the Cargo workspace,
-# under web/, and consumes anima-core compiled to WASM.
+# under web/, and reads the scene JSON the native play server builds.
 
 [profile.release]
 opt-level = 3

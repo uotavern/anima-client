@@ -64,30 +64,24 @@ async function poll(force = false) {
   const controller = new AbortController();
   const t0 = performance.now();
   try {
-    let nextScene;
-    if (WASM_MODE) {
-      nextScene = await wasmPollScene();
-      if (!nextScene) return;
-    } else {
-      // Keep body decoding inside the deadline too. A timed-out response can
-      // resolve later, but must never commit its stale scene.
-      nextScene = await Promise.race([
-        (async () => {
-          const r = await fetch("scene.json?" + Date.now(), { signal: controller.signal, cache: "no-store" });
-          if (!r.ok) throw new Error(r.status);
-          const next = await r.json();
-          if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error("Invalid scene response");
-          return next;
-        })(),
-        new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Scene request timed out")); }, 5000); }),
-      ]);
-    }
+    // Keep body decoding inside the deadline too. A timed-out response can
+    // resolve later, but must never commit its stale scene.
+    const nextScene = await Promise.race([
+      (async () => {
+        const r = await fetch("scene.json?" + Date.now(), { signal: controller.signal, cache: "no-store" });
+        if (!r.ok) throw new Error(r.status);
+        const next = await r.json();
+        if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error("Invalid scene response");
+        return next;
+      })(),
+      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error("Scene request timed out")); }, 5000); }),
+    ]);
     received = true; scenePollFailures = 0; scenePollRetryAt = 0;
     // A native connection belongs to the backend, not the page. Polling may
     // miss the whole login phase, and two servers can reuse player serials.
     // Do not assign the new world to old dialogs/targeting/event cursors, even
-    // while a reload is pending. WASM owns its socket on this page instead.
-    if (wasInWorld && (nextScene.auth || (!WASM_MODE && (nextScene.sessionId || null) !== sceneSessionId))) {
+    // while a reload is pending.
+    if (wasInWorld && (nextScene.auth || (nextScene.sessionId || null) !== sceneSessionId)) {
       reloadForSessionChange();
       return;
     }

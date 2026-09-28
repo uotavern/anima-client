@@ -1,6 +1,5 @@
 // Saved worlds/accounts. Native passwords are resolved by /login, never fetched.
 const LAUNCHER_SELECTION_KEY = "anima.launcher.selection.v1";
-const LAUNCHER_BROWSER_KEY = "anima.launcher.browser.v1";
 let launcherData = { servers: [], accounts: [], passwords: false, persistent: false };
 let launcherServerId = "", launcherAccountId = "";
 let launcherReady = false, launcherWorking = false, launcherConnecting = false;
@@ -8,7 +7,6 @@ let launcherInitPromise = null, launcherAuthKey = "";
 let launcherSelection = { server: "", accounts: {} };
 let launcherRecoverable = false, launcherWorldsPreview = null, launcherFileGeneration = 0, launcherDownloadUrl = null;
 let launcherCancelSavePrompt = null;
-let launcherLoginBinding = null;
 const LAUNCHER_BACKUP_LIMIT = 1024 * 1024;
 const launcherEl = id => document.getElementById(id);
 const launcherText = (id, text) => { const el = launcherEl(id); if (el) el.textContent = text; };
@@ -46,42 +44,19 @@ async function launcherRequest(body) {
   if (!Array.isArray(data.servers) || !Array.isArray(data.accounts)) throw new Error("Invalid profile response.");
   return data;
 }
-function launcherBrowserCommand(body) {
-  // WASM has no OS vault. Whitelist all persisted fields, even if callers pass a password.
-  const next = launcherCurrentBrowser();
-  if (body.op === "save_server") {
-    const old = next.servers.find(s => s.id === body.id);
-    const server = { id: body.id, name: body.name, host: body.host, port: body.port, shard: body.shard, notes: body.notes, relay: body.relay, cache: null };
-    const changed = old && (old.host !== server.host || old.port !== server.port || old.shard !== server.shard || old.relay !== server.relay);
-    if (old && !changed) server.cache = old.cache;
-    if (changed) next.accounts.filter(a => a.server_id === body.id).forEach(a => { a.characters = []; a.last_used = null; });
-    if (old) next.servers[next.servers.indexOf(old)] = server; else next.servers.push(server);
-  } else if (body.op === "save_account") {
-    if (body.remember_password) throw new Error("Password saving is available in the desktop app.");
-    const old = next.accounts.find(a => a.id === body.id);
-    const same = old && old.server_id === body.server_id && old.username === body.username;
-    const account = { id: body.id, server_id: body.server_id, label: body.label, username: body.username, remember_password: false, characters: same ? old.characters : [], last_used: same ? old.last_used : null };
-    if (old) next.accounts[next.accounts.indexOf(old)] = account; else next.accounts.push(account);
-  } else if (body.op === "delete_account") next.accounts = next.accounts.filter(a => a.id !== body.id);
-  else if (body.op === "delete_server") { next.servers = next.servers.filter(s => s.id !== body.id); next.accounts = next.accounts.filter(a => a.server_id !== body.id); }
-  else throw new Error("Unknown profile action.");
-  launcherWriteBrowser(next);
-  return next;
-}
 async function launcherCommand(body) {
-  launcherData = WASM_MODE ? launcherBrowserCommand(body) : await launcherRequest(body);
+  launcherData = await launcherRequest(body);
 }
 function launcherSetBusy(value) {
   launcherWorking = value;
   for (const el of document.querySelectorAll("#lg-account-fields input, #lg-account-fields select, #lg-account-fields textarea, #lg-account-fields button, #lg-library button")) el.disabled = value || launcherConnecting || !launcherReady;
   launcherPasswordHint();
   const refresh = launcherEl("lg-refresh-server");
-  if (refresh) refresh.disabled = value || launcherConnecting || !launcherServer() || WASM_MODE || !launcherReady;
+  if (refresh) refresh.disabled = value || launcherConnecting || !launcherServer() || !launcherReady;
   if (!value) {
     launcherEl("lg-remove-server").disabled = !launcherServer() || launcherConnecting || !launcherReady;
     launcherEl("lg-remove-account").disabled = !launcherAccount() || launcherConnecting || !launcherReady;
   }
-  if (WASM_MODE) launcherEl("lg-shard").disabled = true;
   const retry = launcherEl("lg-retry-profiles");
   if (retry) { retry.hidden = launcherReady; retry.disabled = value; }
   launcherBackupState();
@@ -96,7 +71,7 @@ function launcherPasswordHint() {
   const matching = account && server && account.username === launcherValue("lg-user") && launcherMatchesServer(server);
   input.placeholder = matching && account.remember_password ? "Saved securely · type to replace" : "Enter password";
   launcherText("lg-password-note", !launcherData.passwords
-    ? "Password saving is available in the desktop app. Browser storage contains no passwords."
+    ? "Password saving is available in the desktop app."
     : matching && account.remember_password
       ? "A password is saved in the system vault. Uncheck and save to remove it."
       : "Optional. Stored in macOS Keychain or Windows Credential Manager.");
@@ -137,10 +112,6 @@ function launcherSelectServer(id) {
   launcherEl("lg-port").value = String(server?.port || 2594);
   launcherEl("lg-shard").value = String(server?.shard || 0);
   launcherEl("lg-server-notes").value = server?.notes || "";
-  if (WASM_MODE) {
-    launcherEl("lg-relay").value = server?.relay || "ws://127.0.0.1:2595/relay?target=1";
-    launcherEl("lg-shard").value = "0";
-  }
   launcherSelectAccount(launcherSelection.accounts[launcherServerId] || "");
   launcherRenderLibrary(); launcherRenderInfo(); launcherRememberSelection(); launcherText("lg-profile-msg", "");
 }
@@ -166,12 +137,12 @@ function launcherRenderInfo() {
   const pairs = cache ? [["TCP response", cache.latency_ms == null ? "—" : `${cache.latency_ms} ms`], ["Reported clients", cache.clients == null ? "Not reported" : String(cache.clients)], ["Server uptime", cache.uptime_hours == null ? "Not reported" : `${cache.uptime_hours} hours`]] : [];
   if (cache?.reported_name) pairs.unshift(["Server name", cache.reported_name]);
   for (const [label, value] of pairs) { const row = document.createElement("div"), dt = document.createElement("dt"), dd = document.createElement("dd"); dt.textContent = label; dd.textContent = value; row.append(dt, dd); stats.append(row); }
-  launcherText("lg-info-time", cache ? `Checked ${launcherDate(cache.checked_at)}. ${cache.details_at ? "Reported details: " + launcherDate(cache.details_at) + "." : "This server did not provide public status details."}` : WASM_MODE ? "Live checks are available in the desktop/native client." : "A manual check uses no account or password. Results are cached, not live.");
+  launcherText("lg-info-time", cache ? `Checked ${launcherDate(cache.checked_at)}. ${cache.details_at ? "Reported details: " + launcherDate(cache.details_at) + "." : "This server did not provide public status details."}` : "A manual check uses no account or password. Results are cached, not live.");
   launcherText("lg-info-notes", server?.notes || "");
   const chars = launcherEl("lg-cached-characters"); chars.replaceChildren();
   for (const slot of account?.characters || []) { const row = document.createElement("div"); row.textContent = `${slot.name} · slot ${slot.index + 1}`; chars.append(row); }
   launcherText("lg-character-time", account?.last_used ? `Cached at last authentication: ${launcherDate(account.last_used)}. Log in to refresh.` : "Log in with this account to cache its character list.");
-  launcherEl("lg-refresh-server").disabled = !server || WASM_MODE || launcherBusy() || !launcherReady;
+  launcherEl("lg-refresh-server").disabled = !server || launcherBusy() || !launcherReady;
 }
 function launcherServerForm() {
   const host = launcherValue("lg-host").replace(/^\[|\]$/g, "").toLowerCase(), port = Number(launcherValue("lg-port")), shard = Number(launcherValue("lg-shard"));
@@ -179,7 +150,6 @@ function launcherServerForm() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Port must be between 1 and 65535.");
   if (!Number.isInteger(shard) || shard < 0 || shard > 65535) throw new Error("Shard index must be between 0 and 65535.");
   const server = { op: "save_server", id: launcherServerId || launcherUid(), name: launcherValue("lg-server-name") || host, host, port, shard, notes: launcherEl("lg-server-notes").value || "" };
-  if (WASM_MODE) { const relay = new URL(launcherValue("lg-relay")); if (!["ws:", "wss:"].includes(relay.protocol) || relay.username || relay.password) throw new Error("Enter a ws:// or wss:// relay URL without credentials."); server.relay = relay.href; }
   return server;
 }
 async function launcherSaveServer() {
@@ -218,17 +188,15 @@ async function launcherAction(action, message) {
   finally { launcherSetBusy(false); }
 }
 async function launcherPrepareLogin() {
-  launcherLoginBinding = null;
   if (launcherInitPromise) await launcherInitPromise;
   if (!launcherReady) throw new Error("Profiles are not available. Reopen Anima before connecting.");
   launcherSetBusy(true);
   try {
     const form = launcherServerForm(), credentials = launcherAccountCredentials();
     const server = launcherServer(), account = launcherAccount();
-    const matching = server && account && launcherMatchesServer(server) && account.username === credentials.username
-      && (server.relay || "") === (form.relay || "");
+    const matching = server && account && launcherMatchesServer(server) && account.username === credentials.username;
     const remember = !!launcherEl("lg-save-password").checked;
-    const changed = !matching || server.name !== form.name || server.notes !== form.notes || (server.relay || "") !== (form.relay || "")
+    const changed = !matching || server.name !== form.name || server.notes !== form.notes
       || account.label !== (launcherValue("lg-account-label") || credentials.username) || account.remember_password !== remember
       || (remember && !!credentials.password);
     let save = false;
@@ -238,15 +206,13 @@ async function launcherPrepareLogin() {
       save = choice;
     }
     if (save) await launcherSaveAccount();
-    if (WASM_MODE && (save || matching)) launcherLoginBinding = { account: launcherAccountId, server: launcherServerId,
-      host: form.host, port: form.port, shard: form.shard, relay: form.relay, username: credentials.username };
-    return { account_id: !WASM_MODE && (save || matching) ? launcherAccountId : null,
+    return { account_id: save || matching ? launcherAccountId : null,
       host: form.host, port: form.port, shard: form.shard, ...credentials };
   } finally { launcherSetBusy(false); }
 }
 function launcherConfirmSave() {
   const panel = launcherEl("lg-save-prompt"), password = launcherEl("lg-confirm-password");
-  password.disabled = !launcherData.passwords || WASM_MODE;
+  password.disabled = !launcherData.passwords;
   const account = launcherAccount(), server = launcherServer();
   const sameAccount = !account || (server && launcherMatchesServer(server) && account.username === launcherValue("lg-user"));
   password.checked = !password.disabled && sameAccount && launcherEl("lg-save-password").checked;
@@ -280,25 +246,10 @@ function launcherOnAuth(auth, slots) {
   launcherSetBusy(launcherWorking);
   if (auth !== "characters") { if (auth === "login" || auth === "error") launcherAuthKey = ""; return; }
   launcherEl("lg-pass").value = "";
-  const key = JSON.stringify([WASM_MODE ? launcherLoginBinding : launcherAccountId, slots || []]);
+  const key = JSON.stringify([launcherAccountId, slots || []]);
   if (!launcherReady || key === launcherAuthKey) return;
   launcherAuthKey = key;
-  if (WASM_MODE) {
-    const binding = launcherLoginBinding;
-    if (!binding) return;
-    try {
-      // Read the latest library so another window's edits or recovery are not
-      // overwritten by a character response from this connection.
-      const data = launcherCurrentBrowser();
-      const account = data.accounts.find(a => a.id === binding.account && a.server_id === binding.server && a.username === binding.username);
-      const server = data.servers.find(s => s.id === binding.server);
-      if (!account || !server || server.host !== binding.host || server.port !== binding.port || server.shard !== binding.shard || server.relay !== binding.relay) return;
-      account.characters = (slots || []).map(s => ({ index: s.index, name: s.name })); account.last_used = Date.now();
-      launcherWriteBrowser(data); launcherData = data; launcherRenderInfo();
-    } catch (error) { launcherText("lg-profile-msg", error.message); launcherSetBusy(launcherWorking); }
-  } else {
-    launcherRequest().then(data => { launcherData = data; launcherRenderInfo(); }).catch(e => launcherText("lg-profile-msg", e.message));
-  }
+  launcherRequest().then(data => { launcherData = data; launcherRenderInfo(); }).catch(e => launcherText("lg-profile-msg", e.message));
 }
 function initLauncher() {
   if (launcherInitPromise || !launcherEl("lg-server-list")) return;
@@ -330,12 +281,10 @@ function launcherLoadProfiles() {
   launcherInitPromise = (async () => {
     try {
       try { const selected = JSON.parse(localStorage.getItem(LAUNCHER_SELECTION_KEY) || "null"); if (selected && typeof selected.accounts === "object" && selected.accounts) launcherSelection = selected; } catch (_) {}
-      if (WASM_MODE) {
-        launcherData = launcherReadBrowser(localStorage.getItem(LAUNCHER_BROWSER_KEY) || '{"version":1,"servers":[],"accounts":[]}');
-      } else launcherData = await launcherRequest();
+      launcherData = await launcherRequest();
       launcherReady = true;
       launcherSelectServer(launcherData.servers.some(s => s.id === launcherSelection.server) ? launcherSelection.server : launcherData.servers[0]?.id || "");
-      launcherText("lg-storage-note", WASM_MODE ? "Profiles stay in this browser. Passwords are not stored." : launcherData.persistent ? "Saved on this device, shared by your Anima windows." : "Profiles last for this session only.");
+      launcherText("lg-storage-note", launcherData.persistent ? "Saved on this device, shared by your Anima windows." : "Profiles last for this session only.");
     } catch (e) {
       launcherRecoverable = e.recoverable === true;
       launcherText("lg-profile-msg", e.message); launcherText("lg-storage-note", "Profiles could not be loaded. Existing files have not been changed.");
@@ -375,64 +324,6 @@ function launcherValidateBackup(value) {
   if (new TextEncoder().encode(JSON.stringify(value)).length > LAUNCHER_BACKUP_LIMIT) throw new Error("Choose a worlds backup smaller than 1 MB.");
   return value;
 }
-function launcherBackupFrom(data) {
-  return launcherValidateBackup({ format: "anima-worlds", version: 1, servers: data.servers.map(s => ({
-    name: s.name, host: s.host, port: s.port, shard: s.shard, notes: s.notes || "",
-    ...(s.relay ? { relay: s.relay } : {}),
-    accounts: data.accounts.filter(a => a.server_id === s.id).map(a => ({ label: a.label, username: a.username })),
-  })) });
-}
-function launcherReadBrowser(raw) {
-  try {
-    if (new TextEncoder().encode(raw).length > LAUNCHER_BACKUP_LIMIT) throw new Error();
-    const data = JSON.parse(raw);
-    if (data.version !== 1 || !Array.isArray(data.servers) || !Array.isArray(data.accounts)) throw new Error();
-    const ids = list => list.map(v => { if (!v || !/^[a-z0-9_-]{1,64}$/i.test(v.id)) throw new Error(); return v.id; });
-    const servers = ids(data.servers), accounts = ids(data.accounts);
-    if (new Set(servers).size !== servers.length || new Set(accounts).size !== accounts.length) throw new Error();
-    const names = new Set();
-    for (const a of data.accounts) {
-      const key = JSON.stringify([a.server_id, a.username]);
-      if (!servers.includes(a.server_id) || names.has(key) || !Array.isArray(a.characters || [])) throw new Error();
-      names.add(key);
-    }
-    launcherBackupFrom(data);
-    return { servers: data.servers, accounts: data.accounts.map(a => ({ ...a, remember_password: false })), persistent: true, passwords: false };
-  } catch (_) {
-    const error = new Error("Saved browser profiles could not be loaded. Keep the original and recover profiles, or retry after restoring a compatible file.");
-    error.recoverable = true; throw error;
-  }
-}
-function launcherWriteBrowser(data) {
-  const raw = JSON.stringify({ version: 1, servers: data.servers, accounts: data.accounts });
-  try { launcherReadBrowser(raw); }
-  catch (_) { throw new Error("Profiles exceed the storage limits or contain invalid data. Your saved profiles have not changed."); }
-  localStorage.setItem(LAUNCHER_BROWSER_KEY, raw);
-}
-function launcherCurrentBrowser() {
-  try { return launcherReadBrowser(localStorage.getItem(LAUNCHER_BROWSER_KEY) || '{"version":1,"servers":[],"accounts":[]}'); }
-  catch (error) { throw launcherUnavailable(error); }
-}
-function launcherMergeBrowser(backup) {
-  launcherValidateBackup(backup);
-  const data = launcherCurrentBrowser();
-  const before = [data.servers.length, data.accounts.length];
-  for (const world of backup.servers) {
-    const host = world.host.toLowerCase(), relay = world.relay || "ws://127.0.0.1:2595/relay?target=1";
-    let server = data.servers.find(s => s.name === world.name.trim() && s.host.toLowerCase() === host && s.port === world.port && s.shard === world.shard && (s.relay || "ws://127.0.0.1:2595/relay?target=1") === relay);
-    if (!server) {
-      server = { id: launcherUid(), name: world.name.trim(), host, port: world.port, shard: world.shard, notes: world.notes, relay, cache: null };
-      data.servers.push(server);
-    }
-    for (const entry of world.accounts) {
-      const username = entry.username.trim();
-      if (!data.accounts.some(a => a.server_id === server.id && a.username === username)) data.accounts.push({ id: launcherUid(), server_id: server.id, label: entry.label.trim(), username, remember_password: false, characters: [], last_used: null });
-    }
-  }
-  launcherWriteBrowser(data);
-  data.imported = { servers: data.servers.length - before[0], accounts: data.accounts.length - before[1] };
-  return data;
-}
 function launcherBackupState() {
   const busy = launcherBusy();
   const recover = launcherEl("lg-recover-worlds");
@@ -452,7 +343,7 @@ async function launcherExportWorlds() {
   if (!launcherReady || launcherBusy()) return;
   launcherSetBusy(true);
   try {
-    const backup = WASM_MODE ? launcherBackupFrom(launcherCurrentBrowser()) : await launcherRawRequest({ op: "export" });
+    const backup = await launcherRawRequest({ op: "export" });
     launcherValidateBackup(backup);
     if (launcherDownloadUrl) URL.revokeObjectURL(launcherDownloadUrl);
     launcherDownloadUrl = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2) + "\n"], { type: "application/json" }));
@@ -476,7 +367,7 @@ function launcherPreviewWorlds(text, name) {
       const row = document.createElement("li"); row.textContent = `${server.name} · ${server.host}:${server.port} · ${server.accounts.length} accounts`; list.append(row);
     }
     launcherEl("lg-worlds-preview").hidden = false;
-    launcherWorldsMessage(WASM_MODE ? "Review the servers before adding them. Native backups use the default relay; check its address before connecting." : "Review the servers before adding them. Importing does not connect to any server.");
+    launcherWorldsMessage("Review the servers before adding them. Importing does not connect to any server.");
   } catch (error) { launcherWorldsMessage(error instanceof SyntaxError ? "This file is not valid JSON. Your profiles have not changed." : error.message); }
   launcherEl("lg-cancel-worlds").hidden = !launcherWorldsPreview;
   launcherBackupState();
@@ -486,7 +377,7 @@ async function launcherImportWorlds() {
   launcherSetBusy(true);
   try {
     const backup = launcherWorldsPreview;
-    launcherData = WASM_MODE ? launcherMergeBrowser(backup) : await launcherRequest({ op: "import", backup });
+    launcherData = await launcherRequest({ op: "import", backup });
     launcherWorldsPreview = null; launcherEl("lg-worlds-preview").hidden = true;
     launcherEl("lg-cancel-worlds").hidden = true;
     if (launcherServer()) {
@@ -502,19 +393,7 @@ async function launcherRecoverWorlds() {
   if (!confirm("Keep an exact copy of the unreadable profiles and start an empty library? You can then add profiles or import a worlds backup. Existing passwords stay in the OS vault.")) return;
   launcherSetBusy(true);
   try {
-    let copy;
-    if (WASM_MODE) {
-      const raw = localStorage.getItem(LAUNCHER_BROWSER_KEY);
-      if (raw === null) throw new Error("Profiles changed. Retry loading them first.");
-      try { launcherReadBrowser(raw); throw new Error("Profiles are readable now. Retry loading them first."); }
-      catch (error) { if (!error.recoverable) throw error; }
-      copy = LAUNCHER_BROWSER_KEY + ".recovered-" + launcherUid();
-      localStorage.setItem(copy, raw);
-      if (localStorage.getItem(copy) !== raw) throw new Error("Could not verify the recovery copy. Profiles have not changed.");
-      launcherWriteBrowser({ servers: [], accounts: [] });
-    } else {
-      const data = await launcherRequest({ op: "recover" }); copy = data.recovery_copy;
-    }
+    const copy = (await launcherRequest({ op: "recover" })).recovery_copy;
     launcherLoadProfiles(); await launcherInitPromise;
     launcherWorldsMessage(`Original profiles kept at ${copy}. Add your servers or import a worlds backup.`);
   } catch (error) { launcherWorldsMessage(error.message || "Recovery failed. Your original profiles have not changed."); }

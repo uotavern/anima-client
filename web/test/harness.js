@@ -438,7 +438,7 @@ function newContext(opts = {}) {
     },
 
     /** Every script the page loads — the whole client in one scope.
-     *  web/js/14-wasm.js ends with a bare `main()`: the page's entry point. A
+     *  web/js/99-start.js is a bare `main()`: the page's entry point. A
      *  test loads the CODE, not the page, so `main` is replaced with a recorder
      *  just before that file runs. Pass {boot: true} to let the real one fire. */
     loadAll({ boot = false } = {}) {

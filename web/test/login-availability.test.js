@@ -123,20 +123,3 @@ test("new failures on the new target remain visible even with an identical messa
   eq(el("lg-msg").textContent, "Login failed: global startup failure");
 });
 
-test("browser login errors follow the submitted relay without hiding unscoped errors", async () => {
-  const { ctx, el } = fixture(); await ctx.flush();
-  el("lg-user").value = "fixture-user"; el("lg-relay").value = "ws://fixture.invalid/relay";
-  ctx.set("failedConnection", { login_target: { relay: "ws://fixture.invalid/relay", username: "fixture-user" } });
-  ctx.run('showLogin("error", "relay failed", null, null, null, null, failedConnection)');
-  eq(el("lg-msg").textContent, "Login failed: relay failed");
-  el("lg-relay").value = "ws://other.invalid/relay";
-  ctx.run('showLogin("error", "relay failed", null, null, null, null, failedConnection)');
-  eq(el("lg-msg").textContent, "");
-  el("lg-relay").value = "";
-  ctx.set("failedConnection", { login_target: { relay: ctx.run("WASM_RELAY_DEFAULT"), username: "fixture-user" } });
-  ctx.run('showLogin("error", "default relay failed", null, null, null, null, failedConnection)');
-  eq(el("lg-msg").textContent, "Login failed: default relay failed");
-  ctx.set("failedConnection", { login_target: { unexpected: true } });
-  ctx.run('showLogin("error", "unscoped failure", null, null, null, null, failedConnection)');
-  eq(el("lg-msg").textContent, "Login failed: unscoped failure");
-});

@@ -104,10 +104,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anima-relay"
-version = "0.0.0"
-
-[[package]]
 name = "anima-session"
 version = "0.0.0"
 dependencies = [
@@ -115,16 +111,6 @@ dependencies = [
  "anima-contract-json",
  "anima-core",
  "serde_json",
-]
-
-[[package]]
-name = "anima-wasm"
-version = "0.0.0"
-dependencies = [
- "anima-contract-json",
- "anima-core",
- "serde_json",
- "wasm-bindgen",
 ]
 
 [[package]]

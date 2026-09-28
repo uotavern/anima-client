@@ -8,11 +8,13 @@
 
 Last updated: 2026-08-22 · Status: **Phases 1–3 COMPLETE, including the Phase 3
 "human-playable polish" tail** (iso sprite blitting, walk/attack/typed animations
-incl. UOP + monster body remap, gumps, audio, secure trading, AI contract). 8 crates
-(anima-core / anima-assets / anima-contract-json / anima-net / anima-wasm /
-anima-agent / anima-desktop / anima-relay) + web/; workspace tests and quality gates are green (including 7 golden-packet
+incl. UOP + monster body remap, gumps, audio, secure trading, AI contract). 7 crates
+(anima-core / anima-assets / anima-contract-json / anima-session / anima-net /
+anima-agent / anima-desktop) + web/; workspace tests and quality gates are green (including 7 golden-packet
 regression tests replaying real `uo_proxy` captures, §7); real-data-file tests are
-`#[ignore]`d by default; wasm32 builds.
+`#[ignore]`d by default. The browser WASM client (`anima-wasm`, `anima-relay`,
+`web/js/14-wasm.js`) was removed on 2026-09-29: nothing public used it, and it kept
+JS copies of the scene builder and command parser that drifted from the native ones.
 - **Phase 1:** headless agent connects to a live ServUO, logs in (create + select),
   builds a World, and navigates to a target tile by A* over real UO map data.
 - **Phase 2:** `anima-core` → **wasm32** (sans-IO pays off); `anima-wasm` wraps it for
@@ -94,9 +96,7 @@ treasure maps, and **custom housing** (0xD8 viewing: plane parse/zlib → deferr
 mode-0/1/2 decode against multi.mul bounds → design tiles replace the foundation's
 components in both scene emission and the walkability fold; auto 0xBF/0x1E refresh
 on 0xBF/0x1D revision notices; live-verified against ServUO placement → DesignInsert
-→ delete). Richer brains (`HunterBrain` / `LlmBrain`) and the browser WASM isometric
-page (`/?wasm=1` + `anima-relay` + `anima-net --bin assets` `/terrain.json`) are
-done too — see §6.
+→ delete). Richer brains (`HunterBrain` / `LlmBrain`) are done too — see §6.
 delete-character (0x83) is done too: `build_delete_character` (30 zeroed bytes —
 NOT the password, ClassicUO parity) + a `LoginConfig::delete_existing` flow that
 deletes-once then re-runs select/create against the refreshed 0x86 list, with 0x85
@@ -132,9 +132,10 @@ A **new, from-scratch Ultima Online client**, designed **AI-native** and
 [`anima`](../../anima) AI-player project. The central artifact is a **headless
 game core** (`anima-core`, Rust) that speaks the UO protocol and maintains world
 state with **no rendering/UI/audio**. A thin renderer (web: PixiJS — implemented as
-plain JS, no TS build step) sits on top for humans. The same core serves three consumers: AI agents
-(headless, many), a browser client (core compiled to WASM), and a desktop
-standalone app (Tauri, native TCP).
+plain JS, no TS build step) sits on top for humans. The same core serves AI agents
+(headless, many, through `anima-session`'s bridge) and the desktop standalone app
+(Tauri, native TCP). A third consumer, a browser client with the core compiled to
+WASM, existed until 2026-09-29.
 
 ---
 
@@ -161,6 +162,11 @@ decision + the reasoning so a future session understands the constraints.
 | D14 | **Connection lifetime belongs to transport adapters, not the protocol core** (`anima-net::connection`, `web/js/04-connection.js`, `14-wasm.js`) | One attempt has one cancellation identity. Native DNS/dial workers receive only the endpoint; cancellation shuts down the active socket, deadlines bound server waits, and human character choice gets no deadline. Native scene polling is serialized and late responses cannot replace newer state. WebSocket callbacks carry attempt identity, and ended WASM clients are freed. The page pauses input on transport failure and shows recovery controls. Full product readiness still requires the separate live/runtime audit in `docs/CLIENT_READINESS.md`. |
 | D15 | **Validate game files before saving; preserve unreadable app settings** (`anima-net::uo_dir::check`, `anima-desktop::config` / `setup`) | The native setup window checks the readers and formats that play actually supports, requires an explicit first selection, and keeps folder changes pending until restart. Its Tauri commands are restricted to that local window; the loopback game page cannot invoke them. Configuration updates lock and reread before atomic replacement; recovery first backs up the original bytes. Server/account profiles and OS passwords stay separate. See `docs/GAME_FILES.md`; a startup check is not a complete asset-integrity scan. |
 | D16 | **Renderer preferences have one atomic storage record and typed readers** (`web/storage.js`, `preferences-ui.js`) | Direct storage access and unchecked JSON could abort boot or pass invalid values to audio/input. A guarded adapter validates known groups, keeps pending changes during storage failures and preserves originals on explicit recovery. Legacy keys remain untouched; a restore replaces one record with its previous-copy snapshot in the same write. Export/import exclude the account library and credential vault. Native downloads are scoped to settings blobs from the active renderer and its Downloads directory. Actual file-transfer runtime evidence is still required; see `docs/CLIENT_SETTINGS.md`. |
+
+> **2026-09-29:** the browser half of D5/D7 — the WASM client (`anima-wasm`,
+> `web/js/14-wasm.js`) and `anima-relay` — was removed, and with it D14's `14-wasm.js`
+> adapter. D10 stands: the core stays sans-IO, and the desktop, the bridge and the
+> in-process brains all drive it through `anima-session`.
 
 Release integrity (D17): a version tag must match the app manifest and release
 notes. Resolve it to one commit and reuse the shared CI workflow for that commit
@@ -191,12 +197,13 @@ exercises macOS Keychain with a disposable profile.
 ```
                   anima-core  (Rust — the headless heart)
                   net · world · assets · path     (NO rendering/UI/audio)
-        ┌──────────────────┼──────────────────────┐
-   native lib            WASM                  Tauri backend (native)
-        ▼                  ▼                        ▼
-   AI agents          browser client          desktop standalone
-   (many, headless)   (anima-core = WASM       (Tauri: direct TCP,
-                       + WebSocket relay)       reads local UO data)
+                                 │
+                  anima-session  (Session: TCP driver, pathing, NDJSON bridge)
+              ┌──────────────────┴──────────────────────┐
+         anima-bridge                        anima-net play server + Tauri
+              ▼                                           ▼
+         AI agents                             desktop standalone
+   (any language, headless)          (direct TCP, reads local UO data)
 ```
 
 - **anima-core** — protocol, world state, asset (`.mul`/`.uop`) IO, pathfinding. Pure logic, platform-agnostic.
@@ -205,10 +212,10 @@ exercises macOS Keychain with a disposable profile.
 
 ### The Observation/Action contract (the Interface↔Brain boundary, D2)
 Codified in `anima-core::agent`; its versioned JSON representation lives in
-`anima-contract-json` and is shared by the native NDJSON bridge and WASM. Shape:
+`anima-contract-json` and is shared by the NDJSON bridge and every Rust consumer. Shape:
 - **Observation** (core → brain): player state (pos/hp/mana/stam/skills), nearby mobiles & items, journal deltas, war/hidden flags, targeting/gump prompts pending.
 - **Action** (brain → core): move(dir, run), use/double-click(serial), attack(serial), cast(spell), say(text), target(serial|xyz), pickup/drop/equip, gump-response.
-Keep it a stable schema so scripted/RL/LLM brains and the native/WASM backends all plug into the same thing.
+Keep it a stable schema so scripted/RL/LLM brains all plug into the same thing.
 
 ### AI training layers (context for later, not Phase 1)
 From the design discussion — when the AI side is built, structure it as:
@@ -224,7 +231,7 @@ UO is raw TCP. Browsers forbid arbitrary TCP sockets. This drives the
 standalone/relay split:
 
 - **Desktop (Tauri):** the Rust backend opens TCP directly → fully self-contained standalone. **Recommended primary target.**
-- **Browser:** needs a thin **WebSocket↔TCP relay** (dumb byte pump; protocol parsing still runs in-browser via `anima-core` WASM). Not fully standalone (relay required) but zero-install.
+- **Browser:** would need a thin **WebSocket↔TCP relay** (dumb byte pump; protocol parsing in-browser via `anima-core` WASM). That path was built in Phase 2 and removed on 2026-09-29 as unused; the web renderer now always talks HTTP to the native `play` server.
 
 **Assets reinforce this:** UO `.mul/.uop` files are large and copyrighted (Broadsword/EA) — cannot be redistributed. Users must supply their own UO install. Desktop reads local files natively (easy); pure browser needs the Chromium-only File System Access API (Safari/Firefox gaps) or manual upload. → another reason desktop standalone is the cleaner primary.
 
@@ -315,10 +322,6 @@ anima-client/
     │           │              #   (`ANIMA_MONITOR_PORT`); `anima-bridge` is the same without the UI
     │           ├── cmd.rs     # `cmd`: drive a running `play` server from the shell
     │           └── find_water.rs
-    ├── anima-relay/           # WebSocket↔TCP byte pump so a browser can reach a shard
-    │   └── src/main.rs · ws.rs  # allowlisted targets; RFC 6455 subset, no dependencies
-    ├── anima-wasm/            # wasm-bindgen wrapper: WasmClient (feed bytes → Observation JSON)
-    │   └── src/lib.rs         # build: `wasm-pack build crates/anima-wasm --target web`
     └── anima-agent/           # in-process autonomous brains on the contract
         └── src/lib.rs (Brain, WanderBrain) · main.rs (`anima-brain` runner bin; it was also
             called `anima-agent` until 2026-09-29 and collided with anima-net's bridge bin, so a
@@ -362,8 +365,7 @@ The Phase 2 `scene` bin (an AI patrol rewriting `web/scene.json` for a static pa
 was removed on 2026-09-29: `anima-agent` with `ANIMA_MONITOR_PORT` shows any brain's
 character in the same renderer, read-only, from the session the brain drives.
 
-**Done:** all workspace crates build; formatting, clippy, tests, and the wasm32
-build are enforced by CI. Real-data-file tests remain `#[ignore]`d by default.
+**Done:** all workspace crates build; formatting, clippy and tests are enforced by CI. Real-data-file tests remain `#[ignore]`d by default.
 Validated end-to-end against a live ServUO (see the status block at the top).
 
 ### Sans-IO contract (how a driver uses the login flow)
@@ -385,8 +387,8 @@ loop {
     }
 }
 ```
-The driver is the only code that knows about sockets — write it once for native
-(TCP) and once for WASM (WebSocket). The core stays pure.
+The driver is the only code that knows about sockets (`anima-session`, TCP). The core
+stays pure, so another transport would be one more driver, not a core change.
 
 ---
 
@@ -461,16 +463,18 @@ The driver is the only code that knows about sockets — write it once for nativ
 send 0 keys. `0x24` DrawContainer is implemented end-to-end, including
 server-initiated bank/container windows and filtering vendor/spellbook overloads.
 
-### Phase 2 — renderer (web) + WASM. ✅ COMPLETE.
+### Phase 2 — renderer (web) + WASM. ✅ COMPLETE (WASM half removed 2026-09-29).
 - ✅ `anima-core` compiles to `wasm32-unknown-unknown`; `anima-wasm` (wasm-bindgen)
   exposes `WasmClient` (feed bytes → outbox + `Observation` JSON). `wasm-pack build`
   produces the browser module.
 - ✅ PixiJS renderer (`web/`) draws a live minimap (walkability/Z) + mobiles/items +
   HUD from `Observation`, fed by `anima-net`'s `scene` bridge. Screenshot-verified.
 
-**Remaining tail:** none of the planned work. The relay exists (`crates/anima-relay`,
+**Remaining tail (historical; the browser WASM page, relay and `14-wasm.js` were removed
+on 2026-09-29, and `assets` + `/terrain.json` now serve the replay viewer):** none of the
+planned work. The relay existed (`crates/anima-relay`,
 verified carrying a real login handshake to ServUO), the Tauri shell is done, and
-the browser page is `/?wasm=1` ( `/wasm.html` redirects there): `WasmClient` owns
+the browser page was `/?wasm=1` ( `/wasm.html` redirects there): `WasmClient` owns
 the protocol (character list, walk/say/use/attack, `apply_action_json`),
 `anima-relay` is the WebSocket↔TCP pump, and `cargo run -p anima-net --bin assets`
 serves `/art`, `/gump`, `/font`, and `GET /terrain.json` (the same land/statics
@@ -518,8 +522,8 @@ reaches the shard; `Action::WalkTo` is still a no-op in WASM (no in-process `Map
   `Action::WalkTo`.
 
 **Remaining tail:** none of the planned work. Richer brains (`HunterBrain`,
-`LlmBrain` over `ANIMA_LLM_URL`), the browser WASM isometric page (`/?wasm=1` +
-`anima-relay` + `anima-net --bin assets` `/terrain.json`), and ClassicUO Tier 5
+`LlmBrain` over `ANIMA_LLM_URL`), the browser WASM isometric page (since removed),
+and ClassicUO Tier 5
 asset rows
 (`verdata`, `mapdif`/0xBF/0x18, `fonts.mul`, `tileart.uop`, BWT cliloc, Prof.txt,
 Multimap.rle) are implemented — see CLASSICUO_GAPS.md. (Previously listed here
@@ -630,7 +634,6 @@ Distilled from `anima/CLAUDE.md` — verify against ClassicUO/captures while imp
 ## 9. Toolchain & commands
 
 - **Rust:** 1.96 + cargo present. **Node:** 26 / npm 11 present.
-- WASM target (add when needed): `rustup target add wasm32-unknown-unknown`.
 
 ```bash
 cd ~/dev/uo/anima-client
@@ -669,10 +672,10 @@ fix is to not write that construct, not to fight the formatter.
 ## 10. Open decisions (resolve when you reach them)
 
 - **Tauri vs Electron** for the desktop shell (renderer consistency vs binary size) — §4.
-- **WASM binding strategy** — `wasm-bindgen` + a JS API surface vs a message/snapshot protocol mirroring the Observation/Action contract.
 - **World model data structure at scale** — HashMap-by-serial now; move to `slotmap`/ECS (or Bevy ECS if Bevy becomes the renderer) if entity churn/perf demands.
-- ~~**Relay implementation**~~ — **resolved: a standalone, zero-dependency Rust
-  crate** (`crates/anima-relay`). Standalone because the relay is the one piece
+- ~~**Relay implementation**~~ — **resolved, then removed with the browser WASM client
+  on 2026-09-29:** it was a standalone, zero-dependency Rust
+  crate (`crates/anima-relay`). Standalone because the relay is the one piece
   that must be reachable by a browser that may have nothing else of ours, and
   because bundling it into `play_server` would have coupled the browser path to
   the very server it is supposed to make unnecessary. Zero-dependency because

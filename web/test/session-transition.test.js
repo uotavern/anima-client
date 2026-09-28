@@ -4,8 +4,8 @@ const { test, ok, eq, deepEq } = require("./run.js");
 function world(id, serial = 9) {
   return { sessionId: id, player: { serial, x: 1000, y: 2000 }, map: { tiles: [] }, mobiles: [], items: [], journal: [], sounds: [] };
 }
-function renderer(wasm = false) {
-  const ctx = newContext({ href: wasm ? "http://127.0.0.1:8090/?wasm=1" : undefined });
+function renderer() {
+  const ctx = newContext();
   ctx.mountPage(); ctx.loadAll();
   ctx.run(`world = new PIXI.Container(); mobs = new PIXI.Container(); entLayer = new PIXI.Graphics();
     overLayer = new PIXI.Container(); itemLayer = new PIXI.Container(); barLayer = new PIXI.Container();`);
@@ -53,15 +53,6 @@ test("one native session keeps rendering and logout requests only one reload", a
   eq(ctx.run("scene.player.x"), 1001); eq(reloads(), 0);
   await receive(ctx, { auth: "login" }); await ctx.run("poll(true)");
   eq(reloads(), 1); eq(ctx.run("scene.sessionId"), "same"); deepEq(errors, []);
-});
-
-test("WASM worlds stay on their owning page while their logout still resets the renderer", async () => {
-  const { ctx, errors, reloads } = renderer(true);
-  ctx.set("wasmPollScene", async () => world("browser-one")); await ctx.run("poll()");
-  ctx.set("wasmPollScene", async () => world("browser-two")); await ctx.run("poll()");
-  eq(reloads(), 0); eq(ctx.run("scene.sessionId"), "browser-two");
-  ctx.set("wasmPollScene", async () => ({ auth: "login" })); await ctx.run("poll()");
-  eq(reloads(), 1); deepEq(errors, []);
 });
 
 test("input carries its observed session and a rejection refreshes without replaying it", async () => {

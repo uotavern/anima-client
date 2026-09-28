@@ -1,11 +1,11 @@
-//! Asset-only HTTP server for the browser WASM client.
+//! Asset-only HTTP server: the renderer's art, gumps and fonts plus
+//! `GET /terrain.json`, with no game session. The replay viewer draws recorded
+//! matches over it.
 //!
 //! [`play_server::bind`] loads the UO files and starts HTTP; this bin never
 //! calls [`PlayServer::run`](anima_net::play_server::PlayServer::run), so there
 //! is no shard login and `/scene.json` stays empty. `GET /terrain.json` builds
-//! the isometric map window from the same files. Open `/?wasm=1` (or `/wasm.html`,
-//! which redirects there): `anima-wasm` + `anima-relay` own the protocol, this
-//! server owns art + terrain.
+//! the isometric map window from the same files.
 //!
 //! Usage: `assets [http_port] [web_dir] [data_dir]`
 //!

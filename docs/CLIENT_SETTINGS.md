@@ -39,10 +39,8 @@ returns to the common defaults.
 
 Native identity includes the configured host, port, shard index, account and
 actual player serial. It survives reconnects and does not depend on a saved
-launcher profile. Browser WASM uses the connected relay URL, account and player
-serial; repointing an unchanged relay URL to a different shard is not detectable
-by the browser, so use distinct relay URLs for distinct destinations. Native and
-browser identities are separate. Endpoint/account spelling changes can start a
+launcher profile. (The browser WASM mode, removed on 2026-09-29, keyed layouts on
+its relay URL instead.) Endpoint/account spelling changes can start a
 new layout. The renderer stores a SHA-256 key, not the account name or endpoint;
 passwords never participate. This hash is an identity key, not encryption.
 

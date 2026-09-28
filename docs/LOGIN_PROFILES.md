@@ -48,12 +48,11 @@ interrupted** notice pauses input and macros. Scene requests retry automatically
 with backoff; **Retry now** checks immediately. Recovery restores keyboard focus,
 without replaying held keys or restarting a macro. Reopen Anima if its process
 has stopped. A lost game-server session returns to sign-in; it does not silently
-authenticate again. Browser WASM mode also cancels and times out login attempts,
-and discards callbacks from replaced WebSocket connections.
+authenticate again.
 
 Source after v0.8.3 also associates failed logins with the destination and
-account actually submitted. Changing the selected server, shard, account or
-browser relay hides the previous target's error on the next scene update. New
+account actually submitted. Changing the selected server, shard or account hides
+the previous target's error on the next scene update. New
 failures on the current target remain visible, even with identical wording.
 Global startup errors and older backend responses without target metadata
 continue to display normally. Passwords are not included in error metadata.
@@ -107,14 +106,14 @@ It excludes passwords, vault identifiers and cached server/character information
 Keep the backup private: usernames and private shard addresses are still included.
 
 Import adds missing entries without replacing existing ones. A server matches
-when its name, host, port and shard match; browser mode additionally compares the
-relay URL. Named groups sharing an address therefore survive a round trip.
+when its name, host, port and shard match. Named groups sharing an address
+therefore survive a round trip.
 Accounts match by username within that server. Existing notes, labels, cached
 details and saved passwords remain intact. Repeating an import adds no duplicates.
 New accounts get fresh identifiers and require their passwords to be entered
-again, even on a device where older vault entries still exist. A browser backup
-can include a relay; native TCP ignores it, and a native backup imported into the
-browser uses the default relay until you edit it. Import never logs in or probes a
+again, even on a device where older vault entries still exist. A backup made by
+the removed browser WASM mode can include a relay URL; import accepts it and
+native TCP ignores it. Import never logs in or probes a
 server. The maximum is 100 servers, 500 accounts and a 1 MB backup file.
 
 A malformed, structurally invalid or unsupported-version `launcher.json` now
@@ -164,17 +163,13 @@ character. A status check never sends an account or password.
 - `ANIMA_LOGIN=1 cargo run -p anima-net --bin play` saves non-secret profiles in
   `$HOME/.config/anima-client/launcher.json`. Set `ANIMA_PROFILE_DIR` to use an
   isolated folder. This development server does not enable OS password storage.
-- WASM browser mode saves non-secret profiles in browser storage. Each world can
-  remember a relay URL; the relay's configured target determines the destination,
-  while Host and Port are reference information. Shard selection currently stays
-  at 0. Password saving and direct TCP status checks are unavailable in this mode.
 - Native profile endpoints require a loopback peer, a literal loopback Host,
   same-origin requests and `X-Anima-Launcher: 1`. They are unavailable to LAN
   visitors even if the development server itself is exposed with `ANIMA_BIND`.
 
 ## Validation
 
-The quality gate covers Rust formatting, strict Clippy, Rust tests, WASM compilation,
+The quality gate covers Rust formatting, strict Clippy, Rust tests,
 JavaScript syntax/shared globals, the renderer suite and desktop compilation.
 Regression tests cover persistence, concurrent windows, credential isolation,
 endpoint changes, vault failures, character cache invalidation and public status

@@ -595,7 +595,7 @@ pub fn build_scene(
     )
 }
 
-/// Map window for the WASM asset server (`GET /terrain.json`).
+/// Map window for the asset-only server (`GET /terrain.json`, the replay viewer's map).
 ///
 /// Same `map` + `statics` (+ static `lights`) shape [`build_scene`] emits, built
 /// from map files only — no live [`Session`]. A stub player at `center` drives

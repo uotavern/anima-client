@@ -11,16 +11,6 @@ function visualNow() { return REPLAY_MODE ? replayClockMs : performance.now(); }
 // frame at their interpolated positions with walk/idle animation frames.
 
 const HALF = 22, ZSTEP = 4;
-// `/?wasm=1` (and `/wasm.html` → that URL): protocol in anima-wasm, map from /terrain.json.
-const WASM_MODE = (function () {
-  try {
-    const u = new URL(location.href);
-    if (u.searchParams.get("wasm") === "1") return true;
-    return /(?:^|\/)wasm\.html$/i.test(u.pathname);
-  } catch (e) {
-    return false;
-  }
-})();
 // Resting alpha for a `TileFlag.Translucent` static/item (scene field `tr`).
 // ClassicUO eases such an object's AlphaHue to 178 and the shader consumes it as
 // `AlphaHue / 255f` (GameSceneDrawingSorting.cs:371, StaticView.cs:63,

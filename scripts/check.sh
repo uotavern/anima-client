@@ -42,7 +42,6 @@ run() {
 run cargo fmt --all -- --check
 run cargo clippy --all-targets -- -D warnings
 run cargo test
-run cargo check -p anima-wasm --target wasm32-unknown-unknown
 # Every script the page loads (vendor/ is a pre-built PixiJS drop, not ours).
 while IFS= read -r js; do
     run node --check "$js"

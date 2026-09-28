@@ -51,7 +51,6 @@ async function cancelLoginConnection() {
   const button = document.getElementById("lg-cancel-connection");
   button.disabled = true; button.textContent = "Cancelling…";
   try {
-    if (WASM_MODE) { wasmCancelLogin(id); return; }
     const response = await fetch("login/cancel", {
       method: "POST", headers: { "Content-Type": "application/json", "X-Anima-Launcher": "1" },
       body: JSON.stringify({ attempt_id: id }),

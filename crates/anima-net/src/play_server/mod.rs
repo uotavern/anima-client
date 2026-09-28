@@ -131,12 +131,15 @@ pub struct PlayConfig {
 }
 
 /// Map files shared with the HTTP thread in asset-only mode so
-/// `GET /terrain.json` can emit the same window [`crate::scene::build_scene`] would.
+/// `GET /terrain.json` (the replay viewer's map) can emit the same window
+/// [`crate::scene::build_scene`] would. The multi/animdata readers are this
+/// state's own, opened on the first request: taking the server's would leave a
+/// read-only spectator ([`PlayServer::into_monitor`]) drawing without houses,
+/// boats or animated statics.
 pub(super) struct TerrainState {
     data_dir: PathBuf,
     maps: HashMap<u8, MapData>,
-    pub(super) multis: Option<Multis>,
-    pub(super) animdata: Option<AnimData>,
+    readers: Option<(Option<Multis>, Option<AnimData>)>,
 }
 
 impl TerrainState {
@@ -151,9 +154,11 @@ impl TerrainState {
         let TerrainState {
             data_dir,
             maps,
-            multis,
-            animdata,
+            readers,
         } = self;
+        let data_dir: &PathBuf = data_dir;
+        let (multis, animdata) = readers
+            .get_or_insert_with(|| (Multis::open(data_dir).ok(), AnimData::open(data_dir).ok()));
         // `Entry::Vacant` rather than `or_insert_with`: the fallible open
         // carries a `?`, which cannot cross a closure boundary.
         if let std::collections::hash_map::Entry::Vacant(e) = maps.entry(facet) {
@@ -217,7 +222,7 @@ pub fn bind_with_launcher(cfg: PlayConfig, launcher: Arc<LauncherStore>) -> io::
     // Multi (house/boat) component reader — `multi.idx`/`multi.mul`. Same
     // dataset regardless of facet, so loaded once here (unlike `map`, which
     // reloads per facet in the game loop).
-    let mut multis: Option<Multis> = Multis::open(&data_dir).ok();
+    let multis: Option<Multis> = Multis::open(&data_dir).ok();
     eprintln!(
         "play: multis {}",
         if multis.is_some() {
@@ -293,7 +298,7 @@ pub fn bind_with_launcher(cfg: PlayConfig, launcher: Arc<LauncherStore>) -> io::
     // animdata.mul: resolves a graphical effect's ART tile-id animation sequence +
     // frame interval (used by build_scene to bake `effects[].frames`/`interval`).
     // Read in the game-loop thread only, so a plain Option (no Arc) is enough.
-    let mut animdata: Option<AnimData> = AnimData::open(&data_dir).ok();
+    let animdata: Option<AnimData> = AnimData::open(&data_dir).ok();
     eprintln!(
         "play: animdata {}",
         if animdata.is_some() {
@@ -390,9 +395,9 @@ pub fn bind_with_launcher(cfg: PlayConfig, launcher: Arc<LauncherStore>) -> io::
     let (character_tx, character_rx) = mpsc::channel::<PromptDecision>();
 
     // Asset-only mode (`read_only` + no game loop): HTTP serves `/terrain.json`
-    // from these files so `/?wasm=1` can draw the isometric world without a
-    // play-server Session. Taken out of `PlayServer` because `serve_assets`
-    // never runs `build_scene`.
+    // from these files so the replay viewer can draw the isometric world without
+    // a play-server Session. The facet-0 map moves over (a spectator draws from its
+    // bridge's own map); multis/animdata stay for `into_monitor` and load lazily there.
     let terrain = if cfg.read_only {
         let mut maps = HashMap::new();
         if let Some(m) = map.take() {
@@ -401,8 +406,7 @@ pub fn bind_with_launcher(cfg: PlayConfig, launcher: Arc<LauncherStore>) -> io::
         Some(Arc::new(Mutex::new(TerrainState {
             data_dir: data_dir.clone(),
             maps,
-            multis: multis.take(),
-            animdata: animdata.take(),
+            readers: None,
         })))
     } else {
         None
@@ -673,15 +677,11 @@ impl PlayServer {
     }
 
     /// Keep serving HTTP art/gumps/fonts without connecting to a shard.
-    /// `/scene.json` stays empty. `GET /terrain.json` builds the map window.
-    /// Open `/?wasm=1` (`/wasm.html` redirects there) after `wasm-pack build`.
+    /// `/scene.json` stays empty. `GET /terrain.json` builds the map window
+    /// (the replay viewer draws recorded matches over it).
     pub fn serve_assets(self) -> io::Result<()> {
         eprintln!(
             "assets: serving UO files at http://{}:{}/  (no game session)",
-            self.cfg.bind_addr, self.port
-        );
-        eprintln!(
-            "assets: open http://{}:{}/?wasm=1 after `wasm-pack build crates/anima-wasm --target web --out-dir web/pkg`",
             self.cfg.bind_addr, self.port
         );
         loop {

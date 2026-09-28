@@ -98,12 +98,21 @@ class ReleaseTests(unittest.TestCase):
     def test_draft_retry_requires_successful_builds_and_tests_for_the_same_commit(self):
         run = {"head_sha": "a" * 40, "path": ".github/workflows/release.yml", "status": "completed"}
         names = ["Validate release tag and notes", "Bundle (macos)", "Bundle (windows)",
-                 "Verify the release commit / Rust, WASM, and web quality gates",
+                 "Verify the release commit / Rust and web quality gates",
                  "Verify the release commit / Desktop compile (macos-latest)",
                  "Verify the release commit / Desktop compile (windows-latest)"]
         jobs = {"jobs": [{"name": name, "conclusion": "success"} for name in names]}
         with patch.object(release.subprocess, "check_output", side_effect=[json.dumps(run), json.dumps(jobs)]):
             release.verify_build("example/repo", "123", "a" * 40)
+        # A release built before the rename carries the old quality-gate job name.
+        old = [dict(job) for job in jobs["jobs"]]
+        old[3]["name"] = "Verify the release commit / Rust, WASM, and web quality gates"
+        with patch.object(release.subprocess, "check_output", side_effect=[json.dumps(run), json.dumps({"jobs": old})]):
+            release.verify_build("example/repo", "123", "a" * 40)
+        missing = [job for job in jobs["jobs"] if "quality gates" not in job["name"]]
+        with patch.object(release.subprocess, "check_output", side_effect=[json.dumps(run), json.dumps({"jobs": missing})]):
+            with self.assertRaises(ValueError):
+                release.verify_build("example/repo", "123", "a" * 40)
         jobs["jobs"][1]["conclusion"] = "failure"
         with patch.object(release.subprocess, "check_output", side_effect=[json.dumps(run), json.dumps(jobs)]):
             with self.assertRaises(ValueError):

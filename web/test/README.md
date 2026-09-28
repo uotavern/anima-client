@@ -59,7 +59,7 @@ and an exit code.
 
 - `ctx.load("06-movement.js", …)` — named page scripts, always re-sorted into
   index.html's order. A name the page does not load is an error, not a skip.
-- `ctx.loadAll()` — the whole client. `14-wasm.js` ends with a bare `main()`
+- `ctx.loadAll()` — the whole client. `99-start.js` is a bare `main()`
   (the page's entry point); `loadAll()` replaces `main` with a recorder first.
   `ctx.loadAll({boot: true})` lets the real one run — pair it with
   `ctx.mountPage()`, which mounts index.html's real `<body>`.

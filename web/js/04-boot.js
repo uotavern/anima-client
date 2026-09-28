@@ -58,11 +58,7 @@ async function main() {
   if (typeof wireConnectionControls === "function") wireConnectionControls();
   poll();
   setInterval(poll, 150);
-  if (!WASM_MODE) connectSoundStream(); // SSE: play sounds the instant they fire (no poll wait)
-  if (WASM_MODE) {
-    wasmPrepareLoginUi();
-    showLogin("login");
-  }
+  connectSoundStream(); // SSE: play sounds the instant they fire (no poll wait)
   setInterval(tickBuffTimers, 1000); // count down the buff-bar timers once a second
   // Render-on-demand loop: renderFrame() advances the prediction/glide every
   // animation frame (so motion stays smooth), but app.render() — the expensive GPU
@@ -1155,15 +1151,6 @@ function wireLogin() {
     msg.textContent = "Creating character…";
     go.disabled = true; backButton.disabled = true;
     wizNextBtn.disabled = true; wizBackBtn.disabled = true;
-    if (WASM_MODE) {
-      const err = wasmCreateCharacter(create);
-      if (err) {
-        msg.textContent = "Character creation failed: " + err;
-        go.disabled = false; backButton.disabled = false;
-        wizNextBtn.disabled = false; wizBackBtn.disabled = false;
-      }
-      return;
-    }
     try {
       const response = await fetch("character", {
         method: "POST",
@@ -1221,11 +1208,6 @@ function wireLogin() {
       if (submission !== loginSubmissionGeneration || choosing !== characterStage || choiceId !== characterChoiceId) return;
       if (!choosing && !credentials) { go.disabled = false; backButton.disabled = false; go.focus(); return; }
       msg.textContent = choosing ? "Entering world…" : "Connecting…";
-      if (WASM_MODE) {
-        if (choosing) wasmPlaySlot(slot);
-        else await wasmSubmitLogin();
-        return;
-      }
       const endpoint = choosing ? "character" : "login";
       const body = choosing ? { choice_id: choiceId, slot } : { ...credentials, interactive: true, character_slot: null, create: null };
       const response = await fetch(endpoint, {
@@ -1250,15 +1232,6 @@ function wireLogin() {
     go.disabled = true;
     backButton.disabled = true;
     deleteButton.disabled = true;
-    if (WASM_MODE) {
-      wasmDisconnect();
-      window.updateCharacterLoginStage(false);
-      msg.textContent = "";
-      go.disabled = false;
-      backButton.disabled = true;
-      deleteButton.disabled = true;
-      return;
-    }
     try {
       const response = await fetch("character", {
         method: "POST",
@@ -1286,15 +1259,6 @@ function wireLogin() {
     go.disabled = true;
     backButton.disabled = true;
     deleteButton.disabled = true;
-    if (WASM_MODE) {
-      if (!wasmDeleteSlot(slot.index)) {
-        msg.textContent = "Delete request failed";
-        go.disabled = false;
-        backButton.disabled = false;
-        deleteButton.disabled = false;
-      }
-      return;
-    }
     try {
       const response = await fetch("character", {
         method: "POST",
@@ -1390,11 +1354,9 @@ function isTypingTarget(el) {
 // backends and global startup failures have no target and remain visible.
 function loginErrorMatchesForm(target) {
   if (!target) return true;
-  if (typeof target.username !== "string" || (Object.hasOwn(target, "relay")
-    ? typeof target.relay !== "string" : typeof target.host !== "string")) return true;
+  if (typeof target.username !== "string" || typeof target.host !== "string") return true;
   const value = id => document.getElementById(id)?.value || "";
   if (target.username !== value("lg-user").trim()) return false;
-  if (Object.hasOwn(target, "relay")) return target.relay === (typeof wasmRelayUrl === "function" ? wasmRelayUrl() : value("lg-relay").trim());
   return target.host.toLowerCase() === value("lg-host").trim().toLowerCase()
     && target.port === Number(value("lg-port")) && target.shard === Number(value("lg-shard"));
 }

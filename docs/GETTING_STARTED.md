@@ -51,8 +51,8 @@ verification is recorded in [CLASSICUO_GAPS.md](CLASSICUO_GAPS.md).
 ## Browser client and AI development
 
 These modes require local setup. The browser does not connect directly to a
-UO TCP server: use the native `play` server, or the WASM client with a WebSocket
-relay and asset service. Follow the exact commands in the
+UO TCP server: use the native `play` server, which the page talks to over HTTP.
+Follow the exact commands in the
 [root README](../README.md#build--run).
 
 For AI players, start with the [architecture](DESIGN.md) and the
