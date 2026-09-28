@@ -1,0 +1,130 @@
+name: Bridge release
+
+# Prebuilt `anima-bridge` (the headless NDJSON brain↔body bridge from
+# `anima-session`) so agent authors don't need a Rust toolchain. Tagged
+# `bridge-v*`, separate from the desktop app's `v*` releases, and never marked
+# "latest": the hub's download links follow releases/latest to the desktop app.
+
+on:
+  push:
+    tags: ["bridge-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing bridge-v* tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  verify:
+    name: Verify the release commit
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04's glibc keeps the Linux binary runnable on older distributions.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, archive: tar.gz }
+          - { os: macos-latest, target: aarch64-apple-darwin, archive: tar.gz }
+          - { os: macos-latest, target: x86_64-apple-darwin, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, archive: zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - name: Install pinned Rust toolchain and target
+        shell: bash
+        run: |
+          rustup show active-toolchain
+          rustup target add ${{ matrix.target }}
+      - name: Build anima-bridge
+        shell: bash
+        run: cargo build --release --locked -p anima-session --bin anima-bridge --target ${{ matrix.target }}
+      - name: Package
+        shell: bash
+        run: |
+          name="anima-bridge-${TAG#bridge-}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          exe=anima-bridge; [ "${{ matrix.archive }}" = zip ] && exe=anima-bridge.exe
+          cp "target/${{ matrix.target }}/release/$exe" "dist/$name/"
+          cp LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cd dist
+          if [ "${{ matrix.archive }}" = zip ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bridge-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Create release (not marked latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#bridge-}"
+          schema=$(sed -n 's/^pub const SCHEMA_VERSION: u32 = \([0-9]*\);/\1/p' crates/anima-contract-json/src/lib.rs)
+          cat > notes.md <<EOF
+          Prebuilt **anima-bridge** ${version}: the headless brain↔body bridge from \`anima-session\`.
+          It logs in to a UO shard and speaks newline-delimited JSON on stdin/stdout
+          (observation/action contract schema ${schema}), so an agent in any language can play
+          without a game window, a web UI or a Rust toolchain.
+
+          | Platform | File |
+          | --- | --- |
+          | Linux x86_64 (glibc 2.35+) | \`anima-bridge-${version}-x86_64-unknown-linux-gnu.tar.gz\` |
+          | macOS Apple silicon | \`anima-bridge-${version}-aarch64-apple-darwin.tar.gz\` |
+          | macOS Intel | \`anima-bridge-${version}-x86_64-apple-darwin.tar.gz\` |
+          | Windows x86_64 | \`anima-bridge-${version}-x86_64-pc-windows-msvc.zip\` |
+
+          Usage: \`anima-bridge [host] [port] [username] [password] [data_dir]\` — \`data_dir\` is your own
+          Ultima Online client files (maps for walking). The protocol is documented in
+          [\`crates/anima-session/src/bridge.rs\`](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/crates/anima-session/src/bridge.rs).
+          Check downloads against \`SHA256SUMS\`.
+
+          The macOS binaries are not notarized: if macOS blocks a browser download, run
+          \`xattr -d com.apple.quarantine anima-bridge\` once. Downloads made with \`curl\` are not affected.
+          EOF
+          gh release create "$TAG" dist/* \
+            --title "anima-bridge ${version}" \
+            --notes-file notes.md \
+            --latest=false \
+            --verify-tag
