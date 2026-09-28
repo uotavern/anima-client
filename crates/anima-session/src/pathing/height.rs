@@ -16,7 +16,7 @@ use super::*;
 /// no idea a multi is even there (see [`multi_components_at`]'s doc), so
 /// without this a boat/house roof would never cull and the interior would
 /// never show.
-pub(super) fn roof_scan_tiles(
+pub fn roof_scan_tiles(
     scan: &TileScan,
     multis: Option<&Multis>,
     map: &mut MapData,
@@ -49,7 +49,7 @@ pub(super) fn roof_scan_tiles(
 /// the land-overhang/cave branch (`:96-102`). `PushToRenderQueue` then refuses
 /// mouse selection of anything with `Z > _maxGroundZ`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct DrawCeiling {
+pub struct DrawCeiling {
     pub max_z: i32,
     pub max_ground_z: i32,
     pub no_draw_roofs: bool,
@@ -65,7 +65,7 @@ impl DrawCeiling {
 
 /// ClassicUO `ProcessAlpha` roof/Z rule for one object (`:337` / `:355`):
 /// hide at/above `_maxZ`, else hide if `_noDrawRoofs && IsRoof`.
-pub(super) fn ceil_hz(z: i32, max_z: i32, no_draw_roofs: bool, is_roof: bool) -> bool {
+pub fn ceil_hz(z: i32, max_z: i32, no_draw_roofs: bool, is_roof: bool) -> bool {
     z >= max_z || (no_draw_roofs && is_roof)
 }
 
@@ -73,7 +73,7 @@ pub(super) fn ceil_hz(z: i32, max_z: i32, no_draw_roofs: bool, is_roof: bool) ->
 /// or upper floor over the player vanishes and the interior shows. 127 = draw all.
 /// `multis` widens both scans below to in-view multi components (a house roof
 /// is no different from a real static one) via [`roof_scan_tiles`].
-pub(super) fn max_draw_z_scanned(
+pub fn max_draw_z_scanned(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -146,7 +146,7 @@ pub(super) fn max_draw_z_scanned(
 /// ClassicUO `HasSurfaceOverhead` (`GameSceneDrawingSorting.cs:511`): one
 /// Static/Multi above `obj_z` with NoShoot or Window, close enough to the
 /// current draw ceiling. The 4×4 neighborhood check is [`has_surface_overhead`].
-pub(super) fn overhead_covers(obj_z: i32, max_z: i32, tile_z: i32, flags: u64) -> bool {
+pub fn overhead_covers(obj_z: i32, max_z: i32, tile_z: i32, flags: u64) -> bool {
     tile_z > obj_z
         && flags & (FLAG_NOSHOOT | FLAG_WINDOW) != 0
         && max_z - tile_z + 5 >= tile_z - obj_z
@@ -156,8 +156,7 @@ pub(super) fn overhead_covers(obj_z: i32, max_z: i32, tile_z: i32, flags: u64) -
 /// `(mx, my)` has an overhead cover. One gap and the mobile stays drawn —
 /// that's why a vendor in a doorway is visible from the street and someone
 /// deep inside a shop is not.
-#[cfg(test)]
-pub(super) fn has_surface_overhead_neighborhood(mut covered: impl FnMut(i32, i32) -> bool) -> bool {
+pub fn has_surface_overhead_neighborhood(mut covered: impl FnMut(i32, i32) -> bool) -> bool {
     for dy in -1..=2 {
         for dx in -1..=2 {
             if !covered(dx, dy) {
@@ -190,7 +189,7 @@ fn tile_has_overhead_cover(
 /// `cache` is `(tile_x, tile_y, obj_z) → covered` so overlapping 4×4s of
 /// nearby mobiles don't re-scan the same statics.
 #[allow(clippy::too_many_arguments)] // each is a distinct input the scan needs
-pub(super) fn has_surface_overhead(
+pub fn has_surface_overhead(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -222,7 +221,7 @@ pub(super) fn has_surface_overhead(
 /// the flood, so a multi roof spanning several tiles lifts off as one
 /// connected span instead of stopping dead at the first non-static tile.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn calculate_near_z(
+pub fn calculate_near_z(
     scan: &TileScan,
     multis: Option<&Multis>,
     map: &mut MapData,
@@ -250,34 +249,34 @@ pub(super) fn calculate_near_z(
 }
 
 /// ClassicUO `PATH_OBJECT_FLAGS` (we only model the NORMAL step state).
-pub(super) const POF_IMPASS: u32 = 0x1; // POF_IMPASSABLE_OR_SURFACE
+pub const POF_IMPASS: u32 = 0x1; // POF_IMPASSABLE_OR_SURFACE
 
-pub(super) const POF_SURFACE: u32 = 0x2;
+pub const POF_SURFACE: u32 = 0x2;
 
-pub(super) const POF_BRIDGE: u32 = 0x4;
+pub const POF_BRIDGE: u32 = 0x4;
 
 /// `Constants.DEFAULT_BLOCK_HEIGHT` — head/body clearance needed to stand.
-pub(super) const BLOCK_HEIGHT: i32 = 16;
+pub const BLOCK_HEIGHT: i32 = 16;
 
 /// 8-direction deltas (`Pathfinder._offsetX/_offsetY`), dir 0=N..7=NW.
-pub(super) const OFF_X: [i64; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+pub const OFF_X: [i64; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
 
-pub(super) const OFF_Y: [i64; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+pub const OFF_Y: [i64; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
 /// One walkable/blocking surface on a tile (ClassicUO `PathObject`). Plain data
 /// (all `Copy` fields) — derived so tests can build small synthetic tile lists
 /// (e.g. a staircase) without fighting the borrow checker over reused literals.
 #[derive(Clone, Copy)]
-pub(super) struct PathObj {
-    pub(super) flags: u32,
-    pub(super) z: i32,
-    pub(super) avg_z: i32,
-    pub(super) height: i32,
-    pub(super) land_stretched: bool,
+pub struct PathObj {
+    pub flags: u32,
+    pub z: i32,
+    pub avg_z: i32,
+    pub height: i32,
+    pub land_stretched: bool,
 }
 
 /// Land Z at (x, y), or a deep floor for out-of-bounds (ClassicUO uses -125).
-pub(super) fn land_z(map: &mut MapData, x: i64, y: i64) -> i32 {
+pub fn land_z(map: &mut MapData, x: i64, y: i64) -> i32 {
     if x < 0 || y < 0 {
         return -125;
     }
@@ -286,7 +285,7 @@ pub(super) fn land_z(map: &mut MapData, x: i64, y: i64) -> i32 {
 
 /// Land `AverageZ` / `MinZ` from the 4 corners (ClassicUO `Land.ApplyStretch`),
 /// plus whether the tile is sloped (corners differ → "stretched").
-pub(super) fn land_avg_min(map: &mut MapData, x: i64, y: i64) -> (i32, i32, bool) {
+pub fn land_avg_min(map: &mut MapData, x: i64, y: i64) -> (i32, i32, bool) {
     let z_top = land_z(map, x, y);
     let z_right = land_z(map, x + 1, y);
     let z_left = land_z(map, x, y + 1);
@@ -302,7 +301,7 @@ pub(super) fn land_avg_min(map: &mut MapData, x: i64, y: i64) -> (i32, i32, bool
 }
 
 /// ClassicUO `Land.CalculateCurrentAverageZ` — the slope Z toward `direction`.
-pub(super) fn calc_current_average_z(map: &mut MapData, x: i64, y: i64, direction: i32) -> i32 {
+pub fn calc_current_average_z(map: &mut MapData, x: i64, y: i64, direction: i32) -> i32 {
     let z_top = land_z(map, x, y);
     let z_right = land_z(map, x + 1, y);
     let z_bottom = land_z(map, x + 1, y + 1);
@@ -328,7 +327,7 @@ pub(super) fn calc_current_average_z(map: &mut MapData, x: i64, y: i64, directio
 /// real-statics loop and its multi-component loop (a boat deck plank or house
 /// floor tile) so the two can never derive the impassable/surface/bridge bits
 /// differently.
-pub(super) fn tiledata_path_obj(z: i32, height: i32, tile_flags: u64) -> Option<PathObj> {
+pub fn tiledata_path_obj(z: i32, height: i32, tile_flags: u64) -> Option<PathObj> {
     let impassable = tile_flags & FLAG_IMPASSABLE != 0;
     let is_surface = tile_flags & FLAG_SURFACE != 0;
     let is_bridge = tile_flags & FLAG_BRIDGE != 0;
@@ -373,7 +372,7 @@ pub(super) fn tiledata_path_obj(z: i32, height: i32, tile_flags: u64) -> Option<
 /// impassable/surface split to worry about (its only caller, [`step_ok`], has
 /// its own separate `blocked_by_item` check regardless of what
 /// `calculate_new_z` decides).
-pub(super) fn create_item_list(
+pub fn create_item_list(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -429,11 +428,7 @@ pub(super) fn create_item_list(
 /// `anima_assets::map::score_walkable_z` — so a synthetic staircase (no real
 /// `MapData`) can unit-test the standing-Z math directly; see
 /// `resolve_standing_z` for the matching destination-tile half.
-pub(super) fn bound_min_max_z(
-    source: &[PathObj],
-    current_z: i32,
-    stretched_avg: i32,
-) -> (i32, i32) {
+pub fn bound_min_max_z(source: &[PathObj], current_z: i32, stretched_avg: i32) -> (i32, i32) {
     let mut min_z = -128i32;
     let mut max_z = current_z;
     for obj in source {
@@ -456,7 +451,7 @@ pub(super) fn bound_min_max_z(
 
 /// ClassicUO `Pathfinder.CalculateMinMaxZ`: bound the step using the tile we
 /// came *from* (opposite of `direction`). Returns `(min_z, max_z)`.
-pub(super) fn calc_min_max_z(
+pub fn calc_min_max_z(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -485,7 +480,7 @@ pub(super) fn calc_min_max_z(
 /// bound from [`bound_min_max_z`], resolve the standing Z. `None` when nothing
 /// in the list has clearance to stand on (a real DenyWalk situation). Split out
 /// so a synthetic staircase can unit-test this without a real `MapData`.
-pub(super) fn resolve_standing_z(
+pub fn resolve_standing_z(
     mut list: Vec<PathObj>,
     min_z: i32,
     max_z: i32,
@@ -578,7 +573,7 @@ pub fn calculate_new_z(
 /// [`calculate_new_z`] against a scan the caller already built — the tile loop
 /// resolves ~168 of these per frame and must not rebuild the index each time.
 #[allow(clippy::too_many_arguments)] // mirrors `calculate_new_z`
-pub(super) fn calculate_new_z_scanned(
+pub fn calculate_new_z_scanned(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -597,7 +592,7 @@ pub(super) fn calculate_new_z_scanned(
 
 /// See [`max_draw_z_scanned`]. Called once per scene build (and by tests), so
 /// it builds its own index.
-pub(super) fn max_draw_z(
+pub fn max_draw_z(
     world: &World,
     map: &mut MapData,
     multis: Option<&Multis>,

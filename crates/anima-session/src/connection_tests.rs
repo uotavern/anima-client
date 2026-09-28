@@ -146,11 +146,11 @@ fn two_phase_login_excludes_human_character_choice_from_the_response_deadline() 
 }
 
 #[test]
-fn scenes_keep_connection_identity_but_reconnects_with_the_same_serial_do_not() {
+fn sessions_keep_connection_identity_but_reconnects_with_the_same_serial_do_not() {
     let mut ids = Vec::new();
     for _ in 0..2 {
         let (endpoint, server) = successful_login_server();
-        let mut session = Session::connect_and_login(
+        let session = Session::connect_and_login(
             &endpoint,
             LoginConfig {
                 username: "layout-account".into(),
@@ -161,22 +161,11 @@ fn scenes_keep_connection_identity_but_reconnects_with_the_same_serial_do_not() 
         .unwrap();
         let id = session.id().to_owned();
         assert!(!id.is_empty());
+        // `anima-net`'s render scene publishes these two verbatim as `sessionId` and
+        // `layoutIdentity`; they must hold steady across polls of one connection.
         for _ in 0..2 {
-            let json = crate::scene::build_scene(
-                &mut session,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                &[],
-            );
-            let scene: serde_json::Value = serde_json::from_str(&json).unwrap();
-            assert_eq!(scene["sessionId"], id);
-            assert_eq!(scene["player"]["serial"], 42);
-            let layout = scene["layoutIdentity"].as_str().unwrap();
+            assert_eq!(session.id(), id);
+            let layout = session.layout_identity();
             let identity: serde_json::Value = serde_json::from_str(layout).unwrap();
             assert_eq!(
                 identity,
@@ -188,7 +177,7 @@ fn scenes_keep_connection_identity_but_reconnects_with_the_same_serial_do_not() 
                     "layout-account"
                 ])
             );
-            assert!(!json.contains("fixture-password-not-layout"));
+            assert!(!layout.contains("fixture-password-not-layout"));
         }
         ids.push(id);
         drop(session);

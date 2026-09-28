@@ -1,0 +1,19 @@
+[package]
+name = "anima-session"
+version = "0.0.0"
+edition = "2021"
+description = "Headless UO session for anima: TCP driver, observation/action JSON, pathing and the NDJSON brain bridge. No UI."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+anima-core = { path = "../anima-core" }
+anima-contract-json = { path = "../anima-contract-json" }
+# Map/cliloc/speech readers: pathing terrain and journal localisation.
+anima-assets = { path = "../anima-assets" }
+serde_json = "1"
+
+# The headless brain↔body bridge (NDJSON on stdin/stdout). `anima-net` builds the
+# same bridge with an optional web spectator as `anima-agent`.
+[[bin]]
+name = "anima-bridge"
+path = "src/bin/bridge.rs"

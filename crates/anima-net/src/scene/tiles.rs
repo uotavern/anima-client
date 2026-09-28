@@ -76,22 +76,8 @@ pub const LAND_RADIUS: i64 = 24;
 /// ahead, and shipping these for the whole window would bloat every poll.
 pub const PATH_RADIUS: i64 = 10;
 
-/// Static tiledata flag bits we need for roof/floor hiding (see [`max_draw_z`])
-/// and step-Z resolution (see [`calculate_new_z`]).
-pub(super) const FLAG_IMPASSABLE: u64 = 0x40;
-
-pub(super) const FLAG_SURFACE: u64 = 0x200;
-
-pub(super) const FLAG_BRIDGE: u64 = 0x400;
-
-/// `TileFlag.Window` / `TileFlag.NoShoot` (ClassicUO `TileDataLoader.cs:461/465`).
-/// Together they are the line-of-sight blockers `HasSurfaceOverhead` looks for
-/// on the 4×4 around another mobile — a roof flag alone is not enough.
-pub(super) const FLAG_WINDOW: u64 = 0x1000;
-
-pub(super) const FLAG_NOSHOOT: u64 = 0x2000;
-
-pub(super) const FLAG_ROOF: u64 = 0x1000_0000;
+// FLAG_IMPASSABLE, FLAG_SURFACE, FLAG_BRIDGE, FLAG_WINDOW, FLAG_NOSHOOT and FLAG_ROOF
+// live in `anima_session::pathing` (step-Z and roof rules need them headless).
 
 /// Foliage flag (trees/bushes): the renderer fades these when they'd hide the
 /// player, like ClassicUO's foliage transparency.

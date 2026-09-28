@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anima-core = { path = "../anima-core" }
+# The headless session (driver, JSON contract, pathing, bridge); re-exported by lib.rs.
+anima-session = { path = "../anima-session" }
 anima-contract-json = { path = "../anima-contract-json" }
 anima-assets = { path = "../anima-assets" }
 serde_json = "1"

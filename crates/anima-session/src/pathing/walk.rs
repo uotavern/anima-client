@@ -48,14 +48,14 @@ pub enum StepDeny {
 ///
 /// Cheap enough that the one-shot entry points ([`tile_walkable`] and friends)
 /// just build one per call: that is the same single pass they already paid for.
-pub(super) struct TileScan<'a> {
+pub struct TileScan<'a> {
     world: &'a World,
     ground: std::collections::HashMap<(i64, i64), Vec<StaticTile>>,
     multis: Vec<(u32, &'a Item)>,
 }
 
 impl<'a> TileScan<'a> {
-    pub(super) fn build(world: &'a World, map: &MapData) -> Self {
+    pub fn build(world: &'a World, map: &MapData) -> Self {
         let mut ground: std::collections::HashMap<(i64, i64), Vec<StaticTile>> =
             std::collections::HashMap::new();
         let mut multis = Vec::new();
@@ -85,10 +85,9 @@ impl<'a> TileScan<'a> {
         }
     }
 
-    #[cfg(test)]
     /// Just the multi list — no ground buckets, so no tiledata and no map.
     /// [`multi_components_at`] needs nothing else.
-    pub(super) fn multis_only(world: &'a World) -> Self {
+    pub fn multis_only(world: &'a World) -> Self {
         Self {
             world,
             ground: std::collections::HashMap::new(),
@@ -101,18 +100,18 @@ impl<'a> TileScan<'a> {
         }
     }
 
-    pub(super) fn world(&self) -> &'a World {
+    pub fn world(&self) -> &'a World {
         self.world
     }
 
     /// Dynamic (non-multi, uncontained) items standing on `(x, y)`.
-    pub(super) fn ground_at(&self, x: i64, y: i64) -> &[StaticTile] {
+    pub fn ground_at(&self, x: i64, y: i64) -> &[StaticTile] {
         self.ground.get(&(x, y)).map_or(&[][..], |v| &v[..])
     }
 
     /// Every placed multi, as `(serial, item)`. Usually a handful; the point is
     /// not to walk the whole item table to find them.
-    pub(super) fn multis(&self) -> &[(u32, &'a Item)] {
+    pub fn multis(&self) -> &[(u32, &'a Item)] {
         &self.multis
     }
 }
@@ -150,7 +149,7 @@ impl<'a> TileScan<'a> {
 /// components are never-drawn pathing records.
 ///
 /// (Both fold through [`TileScan`] rather than rescanning the item table.)
-pub(super) fn multi_components_at_scanned(
+pub fn multi_components_at_scanned(
     scan: &TileScan,
     multis: &Multis,
     x: i64,
@@ -205,7 +204,7 @@ pub(super) fn multi_components_at_scanned(
 /// deck then contributes a standing surface, and a hull wall genuinely
 /// blocks, using the EXACT SAME impassable/surface/bridge rules a real static
 /// gets (`StaticTile::impassable`/`::surface`), not a parallel ad hoc check.
-pub(super) fn multi_statics_at(
+pub fn multi_statics_at(
     scan: &TileScan,
     multis: &Multis,
     map: &MapData,
@@ -251,11 +250,7 @@ pub(super) fn multi_statics_at(
 /// copied straight from `Item::pos.z`, which is already the wire's `i8` —
 /// unlike a multi component's synthesized `(origin_z + dz)` sum, there's no
 /// offset arithmetic here that could overflow, so no clamp is needed.
-pub(super) fn dynamic_statics_at_scanned<'s>(
-    scan: &'s TileScan,
-    x: i64,
-    y: i64,
-) -> &'s [StaticTile] {
+pub fn dynamic_statics_at_scanned<'s>(scan: &'s TileScan, x: i64, y: i64) -> &'s [StaticTile] {
     scan.ground_at(x, y)
 }
 
@@ -264,7 +259,7 @@ pub(super) fn dynamic_statics_at_scanned<'s>(
 /// (ServUO places it as its own separate door `Item`, e.g.
 /// `BaseHouse.AddSouthDoor`), so no door exception is needed here — that
 /// already flows through the ordinary dynamic-item path above.
-pub(super) fn multi_blocker_at(
+pub fn multi_blocker_at(
     scan: &TileScan,
     multis: &Multis,
     map: &mut MapData,
@@ -315,7 +310,7 @@ pub(super) fn multi_blocker_at(
 /// [`dynamic_statics_at`] (as [`explain_tile_walkable`] does, for its surface
 /// fold) never scans `World::items` twice for the same tile.
 #[allow(clippy::too_many_arguments)] // tile coords + the caller's pre-fetched fold
-pub(super) fn blocking_item_at_scanned(
+pub fn blocking_item_at_scanned(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -372,7 +367,7 @@ pub(super) fn blocking_item_at_scanned(
 /// to tell "wall" from "door" apart. The blocker check itself still walks
 /// every item [`dynamic_statics_at`] returned (unfiltered), so an impassable
 /// item denies exactly as before.
-pub(super) fn explain_tile_walkable_scanned(
+pub fn explain_tile_walkable_scanned(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -465,7 +460,7 @@ pub fn tile_walkable_for_planning(
 /// it. A `Some` serial only ever comes back alongside a `Some` Z; a tile
 /// that's walkable outright (no door involved, e.g. an already-open doorway)
 /// reports a Z with no serial.
-pub(super) fn explain_tile_walkable_for_planning_scanned(
+pub fn explain_tile_walkable_for_planning_scanned(
     scan: &TileScan,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -565,11 +560,11 @@ pub fn door_blocking_at(
 /// headless `anima-agent`/`anima2` driver) — both plan a route the same way, so
 /// this is the ONE place that combines the static map with `World`'s dynamic
 /// items for A* planning; see [`tile_walkable_for_planning`]'s doc.
-pub(crate) struct MapTerrain<'a> {
-    pub(crate) world: &'a World,
-    pub(crate) map: &'a mut MapData,
-    pub(crate) blocked: &'a HashSet<(u32, u32)>,
-    pub(crate) multis: Option<&'a Multis>,
+pub struct MapTerrain<'a> {
+    pub world: &'a World,
+    pub map: &'a mut MapData,
+    pub blocked: &'a HashSet<(u32, u32)>,
+    pub multis: Option<&'a Multis>,
 }
 
 impl Terrain for MapTerrain<'_> {
@@ -608,7 +603,7 @@ impl Terrain for MapTerrain<'_> {
 /// instead of hammering `Use` on it forever. Shared by `play_server`'s
 /// click-to-walk executor and `lib.rs`'s `Route` — both open a door the same
 /// way (see [`decide_blocked_step`]).
-pub(crate) const MAX_DOOR_OPEN_ATTEMPTS: u32 = 3;
+pub const MAX_DOOR_OPEN_ATTEMPTS: u32 = 3;
 
 /// How long to wait after sending `Use` on a door before resending it, if the
 /// door's own state hasn't visibly changed in the meantime — comfortably
@@ -616,14 +611,14 @@ pub(crate) const MAX_DOOR_OPEN_ATTEMPTS: u32 = 3;
 /// successful) round trip doesn't get its own toggle undone by an impatient
 /// resend (see [`BlockedStepAction::AwaitDoor`]'s doc). Well above the 400ms
 /// cadence tick both `play_server` and `Route` check this on.
-pub(crate) const DOOR_USE_COOLDOWN: Duration = Duration::from_millis(1200);
+pub const DOOR_USE_COOLDOWN: Duration = Duration::from_millis(1200);
 
 /// What the auto-walk executor should do about a next-hop tile that the
 /// *strict* (real-movement) check just denied. Pulled out as a pure function
 /// so the door-vs-wall decision is unit-testable without a live map/session.
 /// Shared by `play_server`'s click-to-walk loop and `lib.rs`'s `Route`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BlockedStepAction {
+pub enum BlockedStepAction {
     /// Send `Use` on this door serial instead of walking — it may just be
     /// closed, not locked, and this tick hasn't tried (enough), and either
     /// we've never sent one yet or the previous one has had a full
@@ -648,10 +643,10 @@ pub(crate) enum BlockedStepAction {
 /// how the executor knows a sent `Use` already landed instead of guessing
 /// off a fixed timer alone.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct DoorUseAttempt {
-    pub(crate) count: u32,
-    pub(crate) sent_at: Instant,
-    pub(crate) graphic_at_send: u16,
+pub struct DoorUseAttempt {
+    pub count: u32,
+    pub sent_at: Instant,
+    pub graphic_at_send: u16,
 }
 
 /// Decide what to do about a blocked next-hop tile. A closed door gets up to
@@ -662,7 +657,7 @@ pub(crate) struct DoorUseAttempt {
 /// (`door_state_changed`) or [`DOOR_USE_COOLDOWN`] has elapsed with no such
 /// change (`pending_use_sent_at`, `now`) — otherwise we're still waiting on
 /// the previous `Use` and must not resend (see [`BlockedStepAction::AwaitDoor`]).
-pub(crate) fn decide_blocked_step(
+pub fn decide_blocked_step(
     door: Option<u32>,
     attempts_so_far: u32,
     pending_use_sent_at: Option<Instant>,
@@ -684,14 +679,14 @@ pub(crate) fn decide_blocked_step(
 
 /// A dead player uses one of ServUO's race-specific ghost bodies. Ghosts walk
 /// through doors.
-pub(super) fn player_is_ghost(world: &World) -> bool {
+pub fn player_is_ghost(world: &World) -> bool {
     world
         .player_mobile()
         .is_some_and(|m| anima_core::world::is_ghost_body(m.body))
 }
 
 /// UO direction (0=N..7=NW) → (dx, dy) tile delta.
-pub(super) fn delta(d: u8) -> (i64, i64) {
+pub fn delta(d: u8) -> (i64, i64) {
     match d & 7 {
         0 => (0, -1),
         1 => (1, -1),
@@ -706,7 +701,7 @@ pub(super) fn delta(d: u8) -> (i64, i64) {
 
 /// Inverse of [`delta`]: a one-tile (dx, dy) step → its UO direction, or `None` if
 /// not a unit step. Used to pick the approach direction for [`calculate_new_z`].
-pub(super) fn dir_from_delta(dx: i64, dy: i64) -> Option<u8> {
+pub fn dir_from_delta(dx: i64, dy: i64) -> Option<u8> {
     match (dx, dy) {
         (0, -1) => Some(0),
         (1, -1) => Some(1),
@@ -766,7 +761,7 @@ pub fn can_step_to(
 
 /// Can a body at (fx, fy, fz) step in direction `dir`? Thin wrapper over
 /// [`can_step_to`] (`.is_ok()`) — see its doc for what changed and why.
-pub(super) fn step_ok(
+pub fn step_ok(
     world: &World,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -855,8 +850,7 @@ pub fn explain_tile_walkable(
 }
 
 /// See [`explain_tile_walkable_for_planning_scanned`].
-#[cfg(test)]
-pub(super) fn explain_tile_walkable_for_planning(
+pub fn explain_tile_walkable_for_planning(
     world: &World,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -870,8 +864,7 @@ pub(super) fn explain_tile_walkable_for_planning(
 
 /// See [`blocking_item_at_scanned`].
 #[allow(clippy::too_many_arguments)] // mirrors the scanned form
-#[cfg(test)]
-pub(super) fn blocking_item_at(
+pub fn blocking_item_at(
     world: &World,
     map: &mut MapData,
     multis: Option<&Multis>,
@@ -886,18 +879,11 @@ pub(super) fn blocking_item_at(
 }
 
 /// See [`multi_components_at_scanned`].
-#[cfg(test)]
-pub(super) fn multi_components_at(
-    world: &World,
-    multis: &Multis,
-    x: i64,
-    y: i64,
-) -> Vec<(u16, i32)> {
+pub fn multi_components_at(world: &World, multis: &Multis, x: i64, y: i64) -> Vec<(u16, i32)> {
     multi_components_at_scanned(&TileScan::multis_only(world), multis, x, y)
 }
 
 /// See [`dynamic_statics_at_scanned`].
-#[cfg(test)]
-pub(super) fn dynamic_statics_at(world: &World, map: &MapData, x: i64, y: i64) -> Vec<StaticTile> {
+pub fn dynamic_statics_at(world: &World, map: &MapData, x: i64, y: i64) -> Vec<StaticTile> {
     TileScan::build(world, map).ground_at(x, y).to_vec()
 }

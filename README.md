@@ -168,9 +168,11 @@ scripts/check.sh                        # every gate CI runs, in CI's order
 cargo run -p anima-net --bin play -- 127.0.0.1 2594 <user> <pass>  # human-playable (open :8090)
 ANIMA_LOGIN=1 cargo run -p anima-net --bin play                    # same, but log in via the browser page
 cargo run -p anima-agent -- 127.0.0.1 2594 <user> <pass> 40       # in-process Rust brain
-cargo run -p anima-net --bin anima-agent -- 127.0.0.1 2594 <u> <p> # NDJSON bridge for an
-                                                                   # external brain (anima2 /
-                                                                   # anima-agent, over stdio)
+cargo run -p anima-session --bin anima-bridge -- 127.0.0.1 2594 <u> <p>
+                                          # headless NDJSON bridge for an external brain (anima2 /
+                                          # anima3, over stdio): no UI linked, ~1.5 MB
+cargo run -p anima-net --bin anima-agent -- 127.0.0.1 2594 <u> <p> # the same bridge, plus a read-only
+                                          # web spectator when ANIMA_MONITOR_PORT is set
 # or the live web renderer (real terrain):
 cargo run -p anima-net --bin scene -- 127.0.0.1 2594 <user> <pass> web/scene.json &
 ( cd web && python3 -m http.server 8011 )   # → http://127.0.0.1:8011/

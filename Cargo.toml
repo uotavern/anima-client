@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/anima-core",
     "crates/anima-contract-json",
+    "crates/anima-session",
     "crates/anima-net",
     "crates/anima-assets",
     "crates/anima-wasm",
@@ -17,6 +18,7 @@ members = [
 default-members = [
     "crates/anima-core",
     "crates/anima-contract-json",
+    "crates/anima-session",
     "crates/anima-net",
     "crates/anima-assets",
     "crates/anima-wasm",

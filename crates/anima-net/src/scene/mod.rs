@@ -3,14 +3,12 @@
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anima_assets::{
-    Anim, AnimData, Art, Cliloc, Image, MapData, Multis, RadarCol, StaticTile, ZReason, MAP_HEIGHT,
-    MAP_WIDTH,
+    Anim, AnimData, Art, Cliloc, Image, MapData, Multis, RadarCol, MAP_HEIGHT, MAP_WIDTH,
 };
 use anima_core::gump_layout::{self, GumpElement, HtmlText};
-use anima_core::path::Terrain;
 use anima_core::World;
 use serde_json::{json, Value};
 
@@ -25,13 +23,13 @@ use crate::Session;
 // `pub use` for the four that carry the crate-facing API (`lib.rs` and
 // `play_server` path into them); plain `use` for the three that are purely
 // internal to the scene build.
-mod height;
+// Walking and height rules are shared with the headless session (`anima-session`),
+// so the per-tile walk flags drawn here match what a brain's pathing believes.
+pub use anima_session::pathing::*;
+
 mod tiles;
-mod walk;
 mod worldmap;
-pub use height::*;
 pub use tiles::*;
-pub use walk::*;
 pub use worldmap::*;
 
 mod terrain;
@@ -579,7 +577,7 @@ pub fn build_scene(
     mark("small_parts", &mut t);
     let no_draw_roofs_u8 = u8::from(no_draw_roofs);
     let session_id = serde_json::to_string(s.id()).unwrap();
-    let layout_identity = serde_json::to_string(&s.layout_identity).unwrap();
+    let layout_identity = serde_json::to_string(s.layout_identity()).unwrap();
     format!(
         "{{\"sessionId\":{session_id},\"layoutIdentity\":{layout_identity},\"player\":{player},\
          \"map\":{{\"cx\":{px},\"cy\":{py},\"radius\":{LAND_RADIUS},\"viewRange\":{RADIUS},\"tiles\":[{tiles}],\"maxZ\":{max_z},\"maxGroundZ\":{max_ground_z},\"noDrawRoofs\":{no_draw_roofs_u8},\"dbg\":{dbg}}},\

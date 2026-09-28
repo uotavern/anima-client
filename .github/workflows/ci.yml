@@ -79,7 +79,7 @@ jobs:
       - name: Test native asset readers
         run: cargo test -p anima-assets --lib
       - name: Test native connections and saved servers
-        run: cargo test -p anima-net --lib
+        run: cargo test -p anima-session -p anima-net --lib
       - name: Test Windows Credential Manager with a disposable profile
         if: runner.os == 'Windows'
         run: cargo test -p anima-desktop native_profile_password_lifecycle -- --ignored

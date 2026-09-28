@@ -7,7 +7,8 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 anima-core = { path = "../anima-core" }
-anima-net = { path = "../anima-net" }
+# Headless: the brains drive a Session and never need the web UI.
+anima-session = { path = "../anima-session" }
 # Observation JSON ↔ Action for `LlmBrain`. The brain still never parses
 # packets; this is the same contract the NDJSON bridge uses.
 anima-contract-json = { path = "../anima-contract-json" }

@@ -11,7 +11,7 @@ use anima_agent::{HunterBrain, LlmBrain, WanderBrain};
 use anima_assets::{Cliloc, MapData, Speeches};
 use anima_core::net::LoginConfig;
 use anima_core::{Action, Brain};
-use anima_net::{Endpoint, Session};
+use anima_session::{Endpoint, Session};
 
 /// Half-width of the walkability window handed to the brain each tick. A
 /// wanderer only ever consults its immediate neighbours, but the window is the
@@ -99,7 +99,7 @@ fn main() {
             Some(map) => s.observation_with_terrain(map, TERRAIN_RADIUS),
             None => s.observation(),
         };
-        anima_net::localize(&mut obs, cliloc.as_ref());
+        anima_session::localize(&mut obs, cliloc.as_ref());
         let actions = brain.decide(&obs);
 
         // Log a compact perception + decision line.

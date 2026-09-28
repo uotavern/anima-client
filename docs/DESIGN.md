@@ -277,18 +277,26 @@ anima-client/
     │       ├── sound.rs       # soundLegacyMUL.uop: sound effects → WAV
     │       └── texmap.rs      # texidx/texmaps.mul: sloped-land seamless textures
     ├── anima-contract-json/   # shared versioned Observation/Action JSON adapter
-    ├── anima-net/             # native TCP driver: Session (login, pump, walk, navigate, actions)
+    ├── anima-session/         # HEADLESS native TCP driver: Session (login, pump, walk, navigate,
+    │   │                      #   actions) — no UI linked; what a brain needs and nothing a screen does
     │   └── src/
     │       ├── lib.rs         # Session + Route/advance_route (non-blocking WalkTo state machine)
+    │       ├── connection.rs  # dialing, login phases, cancellation
     │       ├── json.rs        # compatibility re-export of anima-contract-json
+    │       ├── pathing/       # walking rules shared with the render scene
+    │       │   ├── walk.rs    #   can the player stand there — and if not, is it a door?
+    │       │   └── height.rs  #   ClassicUO CalculateNewZ port: which surface you stand on
+    │       ├── bridge.rs      # the NDJSON brain↔body bridge loop (+ `Spectator` hook)
+    │       └── bin/bridge.rs  # `anima-bridge`: the bridge with no UI at all (brains, arena agents)
+    ├── anima-net/             # the UI layer on anima-session (re-exports it: `anima_net::Session` works)
+    │   └── src/
+    │       ├── lib.rs         # `pub use anima_session::*` + the UI modules below
     │       ├── scene/         # build_scene: World + assets → the web renderer's JSON
     │       │   ├── mod.rs     #   build_scene: order the pieces, assemble the JSON
     │       │   ├── look.rs    #   asset lookups (was 15 closures inside build_scene)
     │       │   ├── entities.rs#   mobiles, ground items, worn equipment, container contents
     │       │   ├── terrain.rs #   the visible tile field — the only `&mut MapData` user
-    │       │   ├── walk.rs    #   can the player stand there — and if not, is it a door?
-    │       │   ├── height.rs  #   ClassicUO CalculateNewZ port: which surface you stand on
-    │       │   ├── tiles.rs   #   tile flags + per-tile art/anim/path suffixes
+    │       │   ├── tiles.rs   #   render tile flags + per-tile art/anim/path suffixes
     │       │   ├── dialogs.rs #   gumps/menus/prompts/trades/maps → renderer JSON
     │       │   ├── feeds.rs   #   seq-stamped replay feeds (sound/anim/damage/effects)
     │       │   ├── multis.rs  #   placed houses/boats + 0xD8 custom-house designs
@@ -304,7 +312,8 @@ anima-client/
     │       └── bin/
     │           ├── play.rs    # `play`: human-playable HTTP server (web/ + /scene.json + /input + SSE sound)
     │           ├── scene.rs   # `scene`: AI-patrol bridge → web/scene.json (Phase 2 demo)
-    │           ├── agent.rs   # `anima-agent`: NDJSON stdin/stdout bridge for the out-of-process Python brain
+    │           ├── agent.rs   # `anima-agent`: anima-session's bridge + optional read-only web spectator
+    │           │              #   (`ANIMA_MONITOR_PORT`); `anima-bridge` is the same without the UI
     │           ├── cmd.rs     # `cmd`: drive a running `play` server from the shell
     │           └── find_water.rs
     ├── anima-relay/           # WebSocket↔TCP byte pump so a browser can reach a shard
@@ -314,7 +323,9 @@ anima-client/
     └── anima-agent/           # in-process autonomous brains on the contract
         └── src/lib.rs (Brain, WanderBrain) · main.rs (`anima-agent` runner bin — NOTE: this bin
             name collides with anima-net's `bin/agent.rs`, also named `anima-agent`; cargo warns
-            but builds both — disambiguate with `-p anima-agent` / `-p anima-net`)
+            but builds both — disambiguate with `-p anima-agent` / `-p anima-net`, or use the
+            headless bridge `anima-bridge` (`-p anima-session`), which has no collision).
+            Depends on anima-session only, so the brains link no UI.
 web/                          # Phase 2+ renderer (outside the Cargo workspace)
 ├── index.html                # the page + all CSS; the <script> order below is load-bearing
 ├── js/                       # PixiJS iso renderer: terrain, sprites, gumps, sound, chat, HUD
@@ -677,7 +688,8 @@ fix is to not write that construct, not to fight the formatter.
   most of a dependency tree for that. It never parses a UO packet: the protocol
   runs in the browser, in `anima-core` via `anima-wasm`.
 - **How the AI brain attaches** — ~~in-process vs out-of-process~~ **resolved: both,
-  not either/or.** In-process: `anima-agent` links `anima-core`/`anima-net` directly
-  (`Brain` trait, `WanderBrain`, Rust). Out-of-process: `anima-net::json` +
-  `anima-net`'s `bin/agent.rs` speak versioned JSON over NDJSON stdin/stdout so the
-  existing Python `anima2` brain can drive a session without any Rust brain code.
+  not either/or.** In-process: `anima-agent` links `anima-core`/`anima-session` directly
+  (`Brain` trait, `WanderBrain`, Rust). Out-of-process: `anima_session::bridge` speaks
+  versioned JSON over NDJSON stdin/stdout so the existing Python `anima2`/`anima3` brains
+  can drive a session without any Rust brain code — built headless as `anima-bridge`
+  (`anima-session`) or with a read-only web spectator as `anima-agent` (`anima-net`).

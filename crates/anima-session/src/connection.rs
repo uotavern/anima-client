@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Correlates UI work with one connection or prompt, including after a process
 /// restart. This is an identity, not a credential or an authorization secret.
-pub(crate) fn fresh_context_id() -> String {
+pub fn fresh_context_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -5,6 +5,7 @@
 //! ones marked `#[ignore]` need real UO data files — see docs/TESTING.md.
 
 use super::*;
+use anima_assets::ZReason;
 
 #[test]
 fn ceil_hz_cave_does_not_hide_a_roof_below_the_ceiling() {

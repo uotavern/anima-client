@@ -48,7 +48,7 @@ dependencies = [
  "anima-assets",
  "anima-contract-json",
  "anima-core",
- "anima-net",
+ "anima-session",
  "serde_json",
 ]
 
@@ -96,6 +96,7 @@ dependencies = [
  "anima-assets",
  "anima-contract-json",
  "anima-core",
+ "anima-session",
  "include_dir",
  "serde",
  "serde_json",
@@ -105,6 +106,16 @@ dependencies = [
 [[package]]
 name = "anima-relay"
 version = "0.0.0"
+
+[[package]]
+name = "anima-session"
+version = "0.0.0"
+dependencies = [
+ "anima-assets",
+ "anima-contract-json",
+ "anima-core",
+ "serde_json",
+]
 
 [[package]]
 name = "anima-wasm"
