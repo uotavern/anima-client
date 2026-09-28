@@ -18,5 +18,5 @@ serde_json = "1"
 anima-assets = { path = "../anima-assets" }
 
 [[bin]]
-name = "anima-agent"
+name = "anima-brain"
 path = "src/main.rs"

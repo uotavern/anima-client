@@ -118,7 +118,7 @@ anima-client/
 │   ├── anima-contract-json/   # shared versioned Observation/Action JSON adapter
 │   ├── anima-net/             # native TCP driver (Session) + `anima-login`/`play`/`scene`/`anima-agent`/`cmd` bins
 │   ├── anima-wasm/            # wasm-bindgen wrapper: WasmClient (feed bytes → Observation JSON)
-│   ├── anima-agent/           # in-process autonomous brains (Brain trait, WanderBrain)
+│   ├── anima-agent/           # in-process autonomous brains (Brain trait, WanderBrain); bin `anima-brain`
 │   └── anima-desktop/         # Tauri standalone shell (native TCP + embedded web renderer)
 └── web/                       # plain JavaScript + PixiJS renderer (outside the Cargo workspace)
 ```
@@ -167,7 +167,7 @@ scripts/check.sh                        # every gate CI runs, in CI's order
 # boot a local ServUO (port 2594), then pick one:
 cargo run -p anima-net --bin play -- 127.0.0.1 2594 <user> <pass>  # human-playable (open :8090)
 ANIMA_LOGIN=1 cargo run -p anima-net --bin play                    # same, but log in via the browser page
-cargo run -p anima-agent -- 127.0.0.1 2594 <user> <pass> 40       # in-process Rust brain
+cargo run -p anima-agent -- 127.0.0.1 2594 <user> <pass> 40       # in-process Rust brain (bin: anima-brain)
 cargo run -p anima-session --bin anima-bridge -- 127.0.0.1 2594 <u> <p>
                                           # headless NDJSON bridge for an external brain (anima2 /
                                           # anima3, over stdio): no UI linked, ~1.5 MB

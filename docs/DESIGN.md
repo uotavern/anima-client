@@ -321,11 +321,10 @@ anima-client/
     ├── anima-wasm/            # wasm-bindgen wrapper: WasmClient (feed bytes → Observation JSON)
     │   └── src/lib.rs         # build: `wasm-pack build crates/anima-wasm --target web`
     └── anima-agent/           # in-process autonomous brains on the contract
-        └── src/lib.rs (Brain, WanderBrain) · main.rs (`anima-agent` runner bin — NOTE: this bin
-            name collides with anima-net's `bin/agent.rs`, also named `anima-agent`; cargo warns
-            but builds both — disambiguate with `-p anima-agent` / `-p anima-net`, or use the
-            headless bridge `anima-bridge` (`-p anima-session`), which has no collision).
-            Depends on anima-session only, so the brains link no UI.
+        └── src/lib.rs (Brain, WanderBrain) · main.rs (`anima-brain` runner bin; it was also
+            called `anima-agent` until 2026-09-29 and collided with anima-net's bridge bin, so a
+            whole-workspace build overwrote one with the other). Depends on anima-session only,
+            so the brains link no UI.
 web/                          # Phase 2+ renderer (outside the Cargo workspace)
 ├── index.html                # the page + all CSS; the <script> order below is load-bearing
 ├── js/                       # PixiJS iso renderer: terrain, sprites, gumps, sound, chat, HUD

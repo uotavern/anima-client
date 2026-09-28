@@ -1,6 +1,7 @@
-//! `anima-agent` — run an autonomous brain on the live server.
+//! `anima-brain` — run an in-process autonomous brain on the live server.
+//! (The binary is named apart from the NDJSON bridge `anima-agent` in `anima-net`.)
 //!
-//! Usage: `anima-agent [host] [port] [user] [pass] [ticks] [data_dir]`
+//! Usage: `anima-brain [host] [port] [user] [pass] [ticks] [data_dir]`
 //! Connects, then each tick: pump the network, observe, let the brain decide,
 //! execute the actions, advance any active [`Action::WalkTo`] route. Logs
 //! perception + decisions so you can watch it live.
