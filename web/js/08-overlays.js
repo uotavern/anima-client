@@ -1361,9 +1361,9 @@ function hud(s) {
   //
   // Server half: the interactive play server stamps every line with a monotonic
   // `seq` (anima-net/src/bin/play_server.rs), so the newest line's seq is a cheap,
-  // reliable change signal there. The non-interactive scene-bin FILE mode
-  // (anima-net/src/bin/scene.rs) never emits `seq` at all AND caps the journal at
-  // 12 lines — a seq-or-length-only signature would stop changing forever the
+  // reliable change signal there. A feed without `seq` (the old scene-bin file
+  // mode, removed 2026-09-29, did this; the WASM and replay feeds build their own
+  // journals) can also cap it at 12 lines — a seq-or-length-only signature would stop changing forever the
   // moment that cap is first hit, even as lines keep rotating through, freezing
   // the panel. So: use seq when the newest line actually has one, else fall back
   // to a full-content signature (cheap here — that mode's array is ≤12 long).

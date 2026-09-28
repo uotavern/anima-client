@@ -116,7 +116,7 @@ anima-client/
 │   │   └── src/{lib,types,agent,gump_layout}.rs · net/ · world/ · path/ · tests/golden.rs
 │   ├── anima-assets/          # .mul/.uop readers: map/tiledata/anim/art/gump/hues/sound/…
 │   ├── anima-contract-json/   # shared versioned Observation/Action JSON adapter
-│   ├── anima-net/             # native TCP driver (Session) + `anima-login`/`play`/`scene`/`anima-agent`/`cmd` bins
+│   ├── anima-net/             # UI layer on anima-session + `anima-login`/`play`/`anima-agent`/`cmd` bins
 │   ├── anima-wasm/            # wasm-bindgen wrapper: WasmClient (feed bytes → Observation JSON)
 │   ├── anima-agent/           # in-process autonomous brains (Brain trait, WanderBrain); bin `anima-brain`
 │   └── anima-desktop/         # Tauri standalone shell (native TCP + embedded web renderer)
@@ -173,9 +173,7 @@ cargo run -p anima-session --bin anima-bridge -- 127.0.0.1 2594 <u> <p>
                                           # anima3, over stdio): no UI linked, ~1.5 MB
 cargo run -p anima-net --bin anima-agent -- 127.0.0.1 2594 <u> <p> # the same bridge, plus a read-only
                                           # web spectator when ANIMA_MONITOR_PORT is set
-# or the live web renderer (real terrain):
-cargo run -p anima-net --bin scene -- 127.0.0.1 2594 <user> <pass> web/scene.json &
-( cd web && python3 -m http.server 8011 )   # → http://127.0.0.1:8011/
+# watch an AI play in the web renderer: run the bridge with ANIMA_MONITOR_PORT=8011 and open :8011
 ```
 
 The source build also has a **server and account library**: save several worlds,

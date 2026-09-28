@@ -311,7 +311,6 @@ anima-client/
     │       ├── main.rs        # `anima-login` bin (login-only smoke test)
     │       └── bin/
     │           ├── play.rs    # `play`: human-playable HTTP server (web/ + /scene.json + /input + SSE sound)
-    │           ├── scene.rs   # `scene`: AI-patrol bridge → web/scene.json (Phase 2 demo)
     │           ├── agent.rs   # `anima-agent`: anima-session's bridge + optional read-only web spectator
     │           │              #   (`ANIMA_MONITOR_PORT`); `anima-bridge` is the same without the UI
     │           ├── cmd.rs     # `cmd`: drive a running `play` server from the shell
@@ -358,14 +357,10 @@ cargo run -p anima-net --bin play -- 127.0.0.1 2594 <user> <pass>
 # empty slot.
 ```
 
-### Running the Phase 2 AI-patrol scene bridge (older demo path, still works)
-```
-cargo run -p anima-net --bin scene -- 127.0.0.1 2594 <user> <pass> web/scene.json &
-( cd web && python3 -m http.server 8011 )      # open http://127.0.0.1:8011/
-```
-The scene bridge logs in, patrols, and rewrites `web/scene.json` ~2×/s; the page
-polls it. (Future: swap the JSON bridge for `anima-wasm` in-browser + a
-WebSocket↔TCP relay so the browser runs the core directly — §4.)
+### Watching an AI in the renderer
+The Phase 2 `scene` bin (an AI patrol rewriting `web/scene.json` for a static page)
+was removed on 2026-09-29: `anima-agent` with `ANIMA_MONITOR_PORT` shows any brain's
+character in the same renderer, read-only, from the session the brain drives.
 
 **Done:** all workspace crates build; formatting, clippy, tests, and the wasm32
 build are enforced by CI. Real-data-file tests remain `#[ignore]`d by default.
@@ -667,7 +662,7 @@ fix is to not write that construct, not to fight the formatter.
 
 - **macOS / Apple Silicon note:** the core is pure logic, no native graphics deps, so no arm64 friction (unlike ClassicUO's SDL/FNA). Friction only appears at the renderer/Tauri stage — prefer arm64-native deps, WebGL2 fallback for WKWebView WebGPU gaps.
 - **Standalone desktop app:** `cargo run -p anima-desktop` (Tauri v2, no npm) — runs the `play` server in-process on a loopback port kept stable across launches (first free of `8190..=8199`, remembered in the desktop config: `localStorage` is keyed by origin, so an ephemeral port silently reset every renderer preference each run) and opens a native window at it; `crates/anima-desktop/README.md` covers `.app`/`.dmg` bundling.
-- **Testing playbook:** [`docs/TESTING.md`](TESTING.md) — GM-assisted testing (teleport/spawn/give via a GM `play` session), the CDP screenshot driver (`scripts/drive.py`), and the `scripts/gm.sh` command wrapper. Set `ANIMA_DEBUG=1` on the `play`/`scene` bins for movement/pathfind/Z-transition traces; the web Options panel has a **Movement debug** HUD (server Z vs eased Z + recent walk notes).
+- **Testing playbook:** [`docs/TESTING.md`](TESTING.md) — GM-assisted testing (teleport/spawn/give via a GM `play` session), the CDP screenshot driver (`scripts/drive.py`), and the `scripts/gm.sh` command wrapper. Set `ANIMA_DEBUG=1` on the `play` bin for movement/pathfind/Z-transition traces; the web Options panel has a **Movement debug** HUD (server Z vs eased Z + recent walk notes).
 
 ---
 
