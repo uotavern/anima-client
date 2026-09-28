@@ -144,3 +144,14 @@ test('moving art stays above terrain and potion travel uses recorded landing tim
   eq(ctx.run('fxEffects[0].sprite.y'),ctx.run('isoY(13,10,0)-HALF'));
   eq(ctx.run('fxEffects[0].totalMs'),1000);
 });
+
+test('replay outcome uses recorded winner and distinguishes interrupted games and draws', () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.set('result', {header:{players:[{serial:1,name:'A'},{serial:2,name:'B'}]},end:{winner:2,score:[0,1]}});
+  eq(ctx.run('replayOutcome(result).title'),'B wins!');
+  eq(ctx.run('replayOutcome(result).detail'),'A 0 — B 1');
+  ctx.run('result.end.aborted="disconnect"');
+  eq(ctx.run('replayOutcome(result).title'),'Match interrupted');
+  ctx.run('result.end.aborted=null; result.end.winner=0');
+  eq(ctx.run('replayOutcome(result).title'),'Draw');
+});

@@ -304,10 +304,25 @@ function replayDraw() {
     app.screen.height / 2 - isoY(data.center.x, data.center.y, data.center.z) * camZoom);
   tickAnimatedStatics(replayClockMs); drawMobs(); drawEffects(replayClockMs); drawBars(replayClockMs);
   replayDrawSpeech(); replayDrawStatus(mobiles); replayDrawPotions(); replayDrawStats(mobiles); replayPlaySounds();
-  app.render(); replayLastDraw = replayTime;
+  replayDrawResult(); app.render(); replayLastDraw = replayTime;
   const frame = replayAt(data.frames, replayTime);
   document.getElementById('replay-seek').value = String(Math.round(replayTime));
   document.getElementById('replay-time').textContent = `${(replayTime / 1000).toFixed(1)} / ${(data.end.t / 1000).toFixed(1)}s · ${frame?.phase || ''} ${frame?.score?.join(' – ') || ''}${frame?.showdown ? ' · SHOWDOWN' : ''}`;
+}
+function replayOutcome(data) {
+  if (data.end.aborted) return {title:'Match interrupted', detail:String(data.end.aborted)};
+  const winner = data.header.players.find(p => p.serial === data.end.winner);
+  return {title:winner ? winner.name + ' wins!' : 'Draw', detail:data.header.players.map((p,i) => p.name + ' ' + (data.end.score?.[i] ?? 0)).join(' — ')};
+}
+function replayDrawResult() {
+  const box = document.getElementById('replay-result');
+  if (!box || !replayData) return;
+  box.hidden = replayTime < replayData.end.t;
+  if (!box.hidden) {
+    const result = replayOutcome(replayData);
+    box.querySelector('h2').textContent = result.title;
+    box.querySelector('p').textContent = result.detail;
+  }
 }
 async function replayFetch(url) {
   const res = await fetch(url); if (!res.ok) throw new Error(`Replay HTTP ${res.status}`);
@@ -319,16 +334,42 @@ async function replayFetch(url) {
   } finally { await reader.cancel(); }
   return new Blob(chunks).text();
 }
+async function replaySetupLike(id) {
+  const button=document.getElementById('replay-like'), status=document.getElementById('replay-like-status');
+  let value=null;
+  const show=()=>{button.textContent=`${value?.liked ? '♥' : '♡'} ${value?.count ?? 'Like'}`; button.setAttribute('aria-pressed',String(!!value?.liked)); button.disabled=!value;};
+  button.onclick=async()=>{
+    if (!value) return;
+    button.disabled=true;
+    try {
+      const response=await fetch('/replay-social/likes/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({liked:!value.liked})});
+      if(!response.ok) throw new Error('Could not save your like.');
+      value=await response.json();status.textContent='';
+    } catch(e){status.textContent=e.message;}
+    show();
+  };
+  try {
+    const response=await fetch('/replay-social/likes',{cache:'no-store'});
+    if(!response.ok) throw new Error('Likes are temporarily unavailable.');
+    value=(await response.json()).likes[id] || null;
+  } catch(e){status.textContent=e.message;}
+  show();
+}
 async function replayStart() {
   document.title = 'UO Arena Replay';
   settings.sfx = true; audioMuted = false;
   const style = document.createElement('style');
-  style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(#replay-stats):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
+  style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(#replay-stats):not(#replay-result):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
   style.textContent += '#replay-stats{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:12px;pointer-events:none;color:#fff;font:13px system-ui;z-index:1000}.replay-fighter{width:240px;max-width:46%;background:#101720e8;border:1px solid #927341;border-radius:6px;padding:10px}.replay-fighter strong{display:block;margin-bottom:7px}.replay-resource{position:relative;background:#20242d;border:1px solid #606573;height:20px;margin-top:4px;overflow:hidden;border-radius:3px}.resource-fill{position:absolute;height:100%}.resource-text{position:absolute;inset:0;text-align:center;line-height:20px;text-shadow:0 1px 2px #000}.replay-fuse{position:absolute;transform:translate(-50%,-100%);font:bold 18px system-ui;color:#fff;background:#a12318;border:1px solid #ffd397;border-radius:50%;min-width:25px;text-align:center;text-shadow:0 1px #000;pointer-events:none}';
+  style.textContent += '#replay-result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2000;width:min(440px,85vw);padding:28px;text-align:center;color:#fff;background:#111923f2;border:2px solid #c59e56;border-radius:12px;font:16px system-ui;box-shadow:0 16px 70px #000a}#replay-result[hidden]{display:none}#replay-result h2{color:#f5d28c}#replay-result button,#replay-result a{display:inline-block;margin:8px;padding:10px;color:#efd4a3}';
   document.head.appendChild(style);
+  const result = document.createElement('section'); result.id='replay-result'; result.hidden=true; result.setAttribute('aria-live','polite');
+  result.innerHTML='<h2></h2><p></p><button type="button">Watch again</button><a href="/#replays">Back to matches</a>';
+  result.querySelector('button').onclick=()=>{replaySeek(0); replayPlaying=true; document.getElementById('replay-play').textContent='Pause';};
+  document.body.appendChild(result);
   const stats = document.createElement('div'); stats.id = 'replay-stats'; document.body.appendChild(stats);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
-  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play">Play</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><button id="replay-sound">Sound on</button><div id="replay-error" role="alert"></div>';
+  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play">Play</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><button id="replay-sound">Sound on</button><button id="replay-like" aria-label="Like this replay" aria-pressed="false" disabled>♡ Like</button><span id="replay-like-status" role="status"></span><div id="replay-error" role="alert"></div>';
   document.body.appendChild(ui);
   const error = e => { document.getElementById('replay-error').textContent = e.message; console.error(e); };
   document.getElementById('replay-play').onclick = () => {
@@ -357,6 +398,16 @@ async function replayStart() {
   if (/^[0-9a-f]{32}$/.test(id || '')) {
     try { const base = new URL(params.get('api') || location.origin); if (!/^https?:$/.test(base.protocol)) throw new Error('Invalid API URL');
       await replayLoad(await replayFetch(new URL(`/duel/replays/${id}.jsonl`, base)));
+      document.body.dataset.replayReady = 'true';
+      if (params.get('thumbnail') !== '1') void replaySetupLike(id);
+      if (params.get('thumbnail') === '1') {
+        audioMuted=true;
+        const action = replayData.visuals.find(e => e.kind === 1) || replayData.visuals.find(e => e.g);
+        replaySeek(Math.min(replayData.end.t * 0.85, action ? action.t + 180 : replayData.end.t * 0.4));
+        const thumbnailStyle=document.createElement('style');
+        thumbnailStyle.textContent='#replay-controls,#replay-stats,#replay-result{display:none!important}';
+        document.head.appendChild(thumbnailStyle);
+      }
     } catch (err) { error(err); }
   }
 }
