@@ -35,7 +35,7 @@ fn main() -> io::Result<()> {
             if let Some((bytes, w, h)) = gumps.by_gump(i) {
                 idx.write_all(&offset.to_le_bytes())?;
                 idx.write_all(&(bytes.len() as u32).to_le_bytes())?;
-                idx.write_all(&((w << 16) | h).to_le_bytes())?;
+                idx.write_all(&(w | (h << 16)).to_le_bytes())?;
                 mul.write_all(&bytes)?;
                 offset += bytes.len() as u32;
                 continue;

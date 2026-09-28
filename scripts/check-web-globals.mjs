@@ -28,7 +28,7 @@ const PAGE = path.join(ROOT, "web", "index.html");
 // added, removed or reordered. `vendor/` is a pre-built PixiJS drop, not ours.
 const html = fs.readFileSync(PAGE, "utf8");
 const files = [...html.matchAll(/<script\s+src="([^"]+)"\s*>\s*<\/script>/g)]
-  .map((m) => m[1])
+  .map((m) => m[1].split("?")[0])
   .filter((src) => !src.startsWith("vendor/"));
 
 if (!files.length) {

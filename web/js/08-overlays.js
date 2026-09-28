@@ -508,6 +508,11 @@ function fxRemove(sprite) {
   sprite.destroy();
 }
 
+function effectTextureUrl(g, kind, hue) {
+  if (kind === 1) return `gump/${g}.png?v=lightning-2`;
+  return `art/static/${g}.png` + (hue ? `?hue=${hue}&fx=1` : '');
+}
+
 function spawnEffect(ev, now) {
   let frames = (ev.frames && ev.frames.length) ? ev.frames : [ev.g | 0];
   const hue = ev.hue | 0;
@@ -532,7 +537,8 @@ function spawnEffect(ev, now) {
     // Moving projectile: lifetime = travel time, scaled by distance + speed
     // (an approximation of ClassicUO's MovingEffect pacing).
     const dist = Math.hypot(tgtPos.x - srcPos.x, tgtPos.y - srcPos.y);
-    totalMs = Math.min(2000, Math.max(150, dist * (40 + (ev.speed | 0) * 8)));
+    totalMs = Number.isFinite(ev.travelMs) ? Math.max(1, Math.min(2000, ev.travelMs))
+      : Math.min(2000, Math.max(150, dist * (40 + (ev.speed | 0) * 8)));
   } else if (ev.kind === 1) {
     totalMs = Math.max(250, cycleMs); // lightning: one quick flash at the target
   } else {
@@ -642,19 +648,21 @@ function drawEffects(now) {
     // Cycle the resolved ART frame list (hue baked server-side via ?hue=).
     const g = o.frames[Math.floor(age / o.fm) % o.frames.length] | 0;
     // Lightning frames are GUMP art (0x4E20 strip); everything else is ART tiles.
-    const base = o.kind === 1 ? `gump/${g}.png` : `art/static/${g}.png`;
     // `fx=1`: hue effect art the way ClassicUO's EFFECT_HUED shader branch does,
     // indexing the ramp by GREEN rather than red (`IsometricWorld.fx:161-164`
     // vs `:119`). Effect art is mostly coloured rather than greyscale, so the
     // two channels disagree and the wrong one lands on a different step of the
     // ramp — a hued fireball at the wrong brightness. Lightning is GUMP art and
     // is drawn unhued, so it never needs the flag.
-    const tex = texFor(base + (o.hue ? `?hue=${o.hue}&fx=1` : ""));
+    const tex = texFor(effectTextureUrl(g, o.kind, o.hue));
     if (tex && o.sprite.texture !== tex) o.sprite.texture = tex;
     o.sprite.visible = !!o.sprite.texture && o.sprite.texture !== PIXI.Texture.EMPTY;
 
     o.sprite.x = isoX(px, py);
-    o.sprite.y = isoY(px, py, pz) + HALF;
+    // Effects use the mobile feet projection. Adding a tile half-height placed
+    // short projectiles underneath the next terrain diamond. Center moving art
+    // at hand/chest height; fixed art and lightning end at the recorded feet.
+    o.sprite.y = isoY(px, py, pz) - (o.kind === 0 ? HALF : 0);
     o.sprite.zIndex = fxDepthZ(px, py, pz | 0);
     const t = age / o.totalMs;
     o.sprite.alpha = t > 0.66 ? Math.max(0, 1 - (t - 0.66) * 3) : 1; // fade out the tail

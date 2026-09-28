@@ -82,6 +82,7 @@ function sweepTexCache() {
   if (now - lastTexSweep < TEX_SWEEP_MS) return;
   lastTexSweep = now;
   const live = new Set();
+  if (REPLAY_MODE) for (const url of replayEffectTextures) live.add(url);
   forEachLiveTexUrl((u) => { if (u) live.add(u); });
   // URL pools cannot describe every on-stage owner: corpse clothing, stationary
   // house previews and an effect's last-good frame are examples. Inspect the

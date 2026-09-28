@@ -2,8 +2,9 @@
 // No fake sprites, no simulation of combat outcomes, and no shard connection.
 let replayData = null, replayTime = 0, replayPlaying = false, replayRate = 1;
 let replayLastReal = 0, replayLastWorld = null, replayLastDraw = -1, replayLastSyncWall = 0;
-const replaySpeechShown = new Set(), replayStatusLabels = new Map();
+const replaySpeechShown = new Set(), replayStatusLabels = new Map(), replayPotionLabels = new Map();
 let replaySoundTime = 0;
+const replayEffectTextures = new Set();
 const replayLooks = new Map(), replayArt = new Map(), replaySpawned = new Set();
 
 function replayAt(rows, t) {
@@ -51,8 +52,14 @@ function replayParse(text) {
     for (const p of players) if (tracks.has(p.serial)) tracks.get(p.serial).push({ ...p, t: r.t, round: r.round, phase: r.phase });
   }
   if ([...tracks.values()].some(t => !t.length)) throw new Error("Missing fighter positions");
-  return { header, end, rows, tracks, loads: [header, ...rows.filter(r => r.type === 'loadout')],
-    speech: rows.filter(r => r.type === 'speech' && tracks.has(r.actor) && typeof r.text === 'string' && r.text.length <= 512 && [0, 2, 9, 10].includes(r.messageType)),
+  const potions = new Map();
+  for (const r of rows.filter(r => r.type === 'potion_state')) {
+    if (!potions.has(r.item)) potions.set(r.item, []);
+    potions.get(r.item).push(r);
+  }
+  return { header, end, rows, tracks, potions, loads: [header, ...rows.filter(r => r.type === 'loadout')],
+    speech: rows.filter(r => r.type === 'speech' && tracks.has(r.actor) && typeof r.text === 'string' && r.text.length <= 512 && [0, 2, 9, 10].includes(r.messageType) &&
+      !(/^\d+$/.test(r.text) && rows.some(p => p.type === 'potion_state' && p.phase === 'tick' && p.holder === r.actor && p.count === Number(r.text) && Math.abs(p.t-r.t) < 25))),
     worlds: rows.filter(r => r.type === 'world'), frames: rows.filter(r => r.type === 'frame'),
     visuals: rows.filter(r => r.type === 'visual').map(replayDecode) };
 }
@@ -72,6 +79,32 @@ async function replayLoadAppearance(p) {
   }
   replayLooks.set(key, { ...body, equip: body.body >= 400 ? equip : [], mounted: mountAnim ? 1 : 0, mountAnim, mountOff });
 }
+function replayEffectUrls(data) {
+  const urls = new Set();
+  const add = (frames, hue, lightning = false) => {
+    for (const g of frames) urls.add(effectTextureUrl(g, lightning ? 1 : 2, hue));
+  };
+  for (const ev of data.visuals) {
+    if (ev.g === undefined) continue;
+    if (ev.kind === 1) { add(Array.from({length:10}, (_,i) => 20000+i), 0, true); continue; }
+    if (!ev.g) continue;
+    add(replayArt.get(ev.g)?.frames || [ev.g], ev.hue);
+    if (ev.explodes) add(replayArt.get(0x36cb)?.frames || [0x36cb], ev.hue);
+  }
+  return [...urls];
+}
+async function replayWarmEffects(data) {
+  const urls = replayEffectUrls(data), deadline = performance.now() + 60000;
+  if (urls.length > 1024) throw new Error('Too many combat graphics in recording');
+  replayEffectTextures.clear(); for (const url of urls) replayEffectTextures.add(url);
+  // A first-play bolt can expire in 150–500ms. Its textures must already exist.
+  // Use the shared bounded loader, including its retry/backoff and GPU cache.
+  while (urls.some(url => !texCache.has(url))) {
+    for (const url of urls) texFor(url);
+    if (performance.now() > deadline) throw new Error('Combat graphics could not load. Please reload the replay.');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
 async function replayLoad(text) {
   replayPlaying = false; stopSoundEffects();
   const data = replayParse(text);
@@ -81,6 +114,8 @@ async function replayLoad(text) {
   for (const e of data.visuals) if (e.g) graphics.add(e.g);
   for (const w of data.worlds) for (const item of w.items) graphics.add(item.g);
   for (const g of graphics) replayArt.set(g, await replayJson(`replay-art.json?g=${g}`));
+  document.getElementById('replay-title').textContent = 'Loading combat effects…';
+  await replayWarmEffects(data);
   const a = data.header.arena, f = a.floor;
   data.center = { x: f[0] + Math.floor(f[2] / 2), y: f[1] + Math.floor(f[3] / 2), z: a.z };
   data.terrain = await replayJson(`terrain.json?x=${data.center.x}&y=${data.center.y}&z=${a.z}&map=0&season=0`);
@@ -98,6 +133,8 @@ function replayResetEffects() {
   overheads.length = 0; replaySpeechShown.clear();
   for (const el of replayStatusLabels.values()) el.remove();
   replayStatusLabels.clear();
+  for (const el of replayPotionLabels.values()) el.remove();
+  replayPotionLabels.clear();
 }
 function replaySeek(t) {
   stopSoundEffects();
@@ -165,6 +202,72 @@ function replayPlaySounds() {
   }
   replaySoundTime = replayTime;
 }
+function replayPotionAt(track, t) {
+  const rows = track.filter(r => r.t <= t), last = rows.at(-1);
+  if (!last || last.phase === 'explode') return null;
+  const prime = rows.findLastIndex(r => r.phase === 'prime');
+  const life = rows.slice(Math.max(0, prime));
+  const tick = life.findLast(r => r.count >= 0);
+  const thrown = life.findLast(r => r.phase === 'throw');
+  let pos = last.pos;
+  if (last.flight && thrown) {
+    const land = track.find(r => r.t >= thrown.t && ['land','explode','prime'].includes(r.phase));
+    const f = Math.max(0, Math.min(1, (t-thrown.t)/Math.max(1, (land?.t || thrown.t+1000)-thrown.t)));
+    pos = thrown.from.map((v,i) => v+(thrown.pos[i]-v)*f);
+  }
+  return {...last, pos, count:tick?.count ?? -1};
+}
+function replayDrawPotions() {
+  for (const [id, track] of replayData.potions) {
+    const state = replayPotionAt(track, replayTime);
+    let el = replayPotionLabels.get(id);
+    if (!state || state.count <= 0) { if (el) el.remove(); replayPotionLabels.delete(id); continue; }
+    if (!el) { el = document.createElement('div'); el.className = 'replay-fuse'; namesEl().appendChild(el); replayPotionLabels.set(id,el); }
+    const holder = state.holder && anim.get('m'+state.holder);
+    const p = holder ? [holder.rx,holder.ry,holder.rz ?? holder.z] : state.pos;
+    el.textContent = String(state.count);
+    el.style.left = ((app.stage.x + isoX(p[0],p[1])*camZoom)*window.innerWidth/app.renderer.width)+'px';
+    el.style.top = ((app.stage.y + (isoY(p[0],p[1],p[2])-(holder ? 90 : state.flight ? 40 : 25))*camZoom)*window.innerHeight/app.renderer.height)+'px';
+  }
+}
+function replayDrawStats(mobiles) {
+  const host = document.getElementById('replay-stats');
+  if (!host) return;
+  for (let i=0; i<mobiles.length; i++) {
+    const m=mobiles[i];
+    let panel=host.children[i];
+    if (!panel) {
+      panel=document.createElement('section'); panel.className='replay-fighter';
+      const name=document.createElement('strong'); panel.appendChild(name);
+      for (const label of ['HP','Mana','Stamina']) {
+        const row=document.createElement('div'); row.className='replay-resource';
+        const text=document.createElement('span'); text.className='resource-text';
+        const fill=document.createElement('div'); fill.className='resource-fill';
+        row.setAttribute('role','progressbar'); row.setAttribute('aria-label',label);
+        row.append(fill,text); panel.appendChild(row);
+      }
+      host.appendChild(panel);
+    }
+    panel.children[0].textContent=m.name;
+    [['hits','hitsMax','HP','#bd4141'],['mana','manaMax','Mana','#3b78c9'],['stam','stamMax','Stamina','#b99a35']].forEach(([value,max,label,color],n)=>{
+      const row=panel.children[n+1], current=Math.max(0,Number(m[value])||0), cap=Math.max(0,Number(m[max])||0);
+      row.children[0].style.width=(cap ? Math.min(100,current/cap*100) : 0)+'%';
+      row.children[0].style.background=(label==='HP' && m.poisoned) ? '#288849' : color;
+      row.children[1].textContent=`${label} ${current} / ${cap}`;
+      row.setAttribute('aria-label',m.name+' '+label); row.setAttribute('aria-valuenow',String(current));
+      row.setAttribute('aria-valuemin','0'); row.setAttribute('aria-valuemax',String(cap));
+    });
+  }
+}
+function replayTravelMs(data, ev) {
+  for (const track of data.potions.values()) {
+    const thrown = track.find(r => r.phase === 'throw' && r.actor === ev.src && r.graphic === ev.g && Math.abs(r.t-ev.t) < 25);
+    if (!thrown) continue;
+    const landed = track.find(r => r.t >= thrown.t && ['land','explode','prime'].includes(r.phase));
+    return landed ? landed.t-thrown.t : 1000;
+  }
+  return undefined;
+}
 function replayDraw() {
   if (!replayData) return;
   const data = replayData;
@@ -194,13 +297,13 @@ function replayDraw() {
     if (ev.t > replayTime || replayTime - ev.t > 3000 || ev.g === undefined || replaySpawned.has(ev.seq)) continue;
     replaySpawned.add(ev.seq);
     const art = replayArt.get(ev.g), ex = replayArt.get(0x36cb);
-    spawnEffect({ ...ev, ...(ev.kind === 0 ? {src:0,tgt:0} : {}), frames: art?.frames, interval: art?.interval, exFrames: ex?.frames, exInterval: ex?.interval }, ev.t + 1000);
+    spawnEffect({ ...ev, travelMs: ev.kind === 0 ? replayTravelMs(data, ev) : undefined, ...(ev.kind === 0 ? {src:0,tgt:0} : {}), frames: art?.frames, interval: art?.interval, exFrames: ex?.frames, exInterval: ex?.interval }, ev.t + 1000);
   }
   app.stage.scale.set(camZoom);
   app.stage.position.set(app.screen.width / 2 - isoX(data.center.x, data.center.y) * camZoom,
     app.screen.height / 2 - isoY(data.center.x, data.center.y, data.center.z) * camZoom);
   tickAnimatedStatics(replayClockMs); drawMobs(); drawEffects(replayClockMs); drawBars(replayClockMs);
-  replayDrawSpeech(); replayDrawStatus(mobiles); replayPlaySounds();
+  replayDrawSpeech(); replayDrawStatus(mobiles); replayDrawPotions(); replayDrawStats(mobiles); replayPlaySounds();
   app.render(); replayLastDraw = replayTime;
   const frame = replayAt(data.frames, replayTime);
   document.getElementById('replay-seek').value = String(Math.round(replayTime));
@@ -220,8 +323,10 @@ async function replayStart() {
   document.title = 'UO Arena Replay';
   settings.sfx = true; audioMuted = false;
   const style = document.createElement('style');
-  style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
+  style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(#replay-stats):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
+  style.textContent += '#replay-stats{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:12px;pointer-events:none;color:#fff;font:13px system-ui;z-index:1000}.replay-fighter{width:240px;max-width:46%;background:#101720e8;border:1px solid #927341;border-radius:6px;padding:10px}.replay-fighter strong{display:block;margin-bottom:7px}.replay-resource{position:relative;background:#20242d;border:1px solid #606573;height:20px;margin-top:4px;overflow:hidden;border-radius:3px}.resource-fill{position:absolute;height:100%}.resource-text{position:absolute;inset:0;text-align:center;line-height:20px;text-shadow:0 1px 2px #000}.replay-fuse{position:absolute;transform:translate(-50%,-100%);font:bold 18px system-ui;color:#fff;background:#a12318;border:1px solid #ffd397;border-radius:50%;min-width:25px;text-align:center;text-shadow:0 1px #000;pointer-events:none}';
   document.head.appendChild(style);
+  const stats = document.createElement('div'); stats.id = 'replay-stats'; document.body.appendChild(stats);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
   ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play">Play</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><button id="replay-sound">Sound on</button><div id="replay-error" role="alert"></div>';
   document.body.appendChild(ui);

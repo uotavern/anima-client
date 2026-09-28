@@ -99,3 +99,48 @@ test('replay accepts real spell and public speech types but excludes private cha
   ctx.set('record', rows.map(r=>JSON.stringify(r)).join('\n'));
   eq(ctx.run('replayParse(record).speech.map(s=>s.messageType).join()'),'0,2,9,10');
 });
+
+test('replay preloads energy bolt, potion, impact and all lightning frames', () => {
+  const ctx = newContext().loadAll();
+  ctx.run(`replayArt.set(14239,{frames:[14239,14240]}); replayArt.set(0x36cb,{frames:[0x36cb,0x36cc]})`);
+  ctx.set('data',{visuals:[{kind:0,g:14239,hue:5,explodes:true},{kind:0,g:3853,hue:0},{kind:1,g:0,hue:0}]});
+  eq(ctx.run('replayEffectUrls(data).length'),15);
+  ok(ctx.run("replayEffectUrls(data).includes('art/static/14240.png?hue=5&fx=1')"));
+  ok(ctx.run("replayEffectUrls(data).includes('gump/20009.png?v=lightning-2')"));
+});
+test('potion countdown follows holding, flight, landing, explosion and a reused stack', () => {
+  const ctx = newContext().loadAll();
+  ctx.set('track',[
+    {t:0,phase:'prime',count:-1,pos:[10,10,0],holder:1},
+    {t:100,phase:'tick',count:3,pos:[10,10,0],holder:1},
+    {t:200,phase:'throw',count:-1,flight:true,from:[10,10,0],pos:[20,10,0]},
+    {t:1100,phase:'tick',count:2,flight:true,pos:[20,10,0]},
+    {t:1200,phase:'land',count:-1,flight:false,pos:[20,10,0]},
+    {t:3000,phase:'explode',count:0,pos:[20,10,0]},
+    {t:4000,phase:'prime',count:-1,pos:[10,10,0],holder:1}
+  ]);
+  eq(ctx.run('replayPotionAt(track,700).count'),3);
+  eq(ctx.run('replayPotionAt(track,700).pos[0]'),15);
+  eq(ctx.run('replayPotionAt(track,1500).count'),2);
+  eq(ctx.run('replayPotionAt(track,3000)'),null);
+  eq(ctx.run('replayPotionAt(track,4000).count'),-1);
+});
+test('replay resource panels use recorded HP mana stamina and refresh after seeking', () => {
+  const ctx = newContext().loadAll();
+  ctx.run(`const host=document.createElement('div'); host.id='replay-stats'; document.body.appendChild(host);
+    replayDrawStats([{name:'Mage',hits:42,hitsMax:100,mana:17,manaMax:100,stam:5,stamMax:25}]);`);
+  eq(ctx.run("document.getElementById('replay-stats').children[0].children[2].children[1].textContent"),'Mana 17 / 100');
+  eq(ctx.run("document.getElementById('replay-stats').children[0].children[3].children[0].style.width"),'20%');
+  ctx.run("replayDrawStats([{name:'Mage',hits:100,hitsMax:100,mana:100,manaMax:100,stam:25,stamMax:25}])");
+  eq(ctx.run("document.getElementById('replay-stats').children[0].children[1].getAttribute('aria-valuenow')"),'100');
+});
+
+test('moving art stays above terrain and potion travel uses recorded landing time', () => {
+  const ctx = newContext({search:'?replay=1'}).loadAll();
+  ctx.run(`world=new PIXI.Container(); texFor=()=>({width:6,height:28});
+    spawnEffect({kind:0,g:14239,sx:10,sy:10,sz:0,tx:16,ty:10,tz:0,speed:7,travelMs:1000},1000);
+    drawEffects(1500);`);
+  eq(ctx.run('fxEffects[0].sprite.x'),ctx.run('isoX(13,10)'));
+  eq(ctx.run('fxEffects[0].sprite.y'),ctx.run('isoY(13,10,0)-HALF'));
+  eq(ctx.run('fxEffects[0].totalMs'),1000);
+});
