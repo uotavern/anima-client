@@ -64,6 +64,28 @@ function replayParse(text) {
     visuals: rows.filter(r => r.type === 'visual').map(replayDecode) };
 }
 const replayJsonCache = new Map();
+let replayPackPromise = null;
+function replayLoadPack() {
+  if (!replayPackPromise) replayPackPromise = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch('combat-metadata.json?v=1', { signal: controller.signal });
+      if (!response.ok) return;
+      const pack = await response.json();
+      if (pack.schema !== 1 || !pack.json || !pack.images || Object.keys(pack.images).length > 1024) return;
+      for (const [url, data] of Object.entries(pack.json)) {
+        if (/^replay-(art|look)\.json\?/.test(url)) replayJsonCache.set(url, Promise.resolve(data));
+      }
+      for (const [url, src] of Object.entries(pack.images)) {
+        if (/^(art\/static|gump)\/\d+\.png(?:\?|$)/.test(url) && typeof src === 'string' && src.startsWith('data:image/png;base64,'))
+          PIXI.Assets.add({ alias: url, src });
+      }
+    } catch { /* Optional acceleration: retain the ordinary asset loader. */ }
+    finally { clearTimeout(timer); }
+  })();
+  return replayPackPromise;
+}
 async function replayJson(url) {
   if (!replayJsonCache.has(url)) {
     const request = (async () => {
@@ -134,10 +156,25 @@ async function replayWarmEffects(data) {
     await new Promise(resolve => setTimeout(resolve, 25));
   }
 }
+function replayBufferReady(data, t, next) {
+  // Fetch only the approaching combat window; never wait for an entire match.
+  const upcoming = data.visuals.filter(ev => ev.t >= t - 3000 && ev.t <= t + 10000);
+  const urls = replayEffectUrls({ visuals: upcoming });
+  replayEffectTextures.clear();
+  for (const url of urls) { replayEffectTextures.add(url); texFor(url); }
+  const due = replayEffectUrls({ visuals: upcoming.filter(ev => ev.t <= next) });
+  return due.every(url => texCache.has(url));
+}
 async function replayLoad(text) {
   replayPlaying = false; stopSoundEffects();
   const data = replayParse(text);
-  replayLooks.clear(); replayArt.clear(); replayJsonCache.clear();
+  replayLooks.clear(); replayArt.clear();
+  const a = data.header.arena, f = a.floor;
+  data.center = { x: f[0] + Math.floor(f[2] / 2), y: f[1] + Math.floor(f[3] / 2), z: a.z };
+  // Start the arena request immediately; observe failures while preparing art.
+  const terrain = replayJson(`terrain.json?x=${data.center.x}&y=${data.center.y}&z=${a.z}&map=0&season=0`);
+  terrain.catch(() => {});
+  await replayLoadPack();
   const looks = new Map(data.loads.flatMap(load => load.players).map(p => [replayLookKey(p), p]));
   await replayLoadBatch([...looks.values()], 'Loading fighters…', replayLoadAppearance);
   const graphics = new Set([0x36cb]);
@@ -145,11 +182,9 @@ async function replayLoad(text) {
   for (const w of data.worlds) for (const item of w.items) graphics.add(item.g);
   await replayLoadBatch([...graphics], 'Loading scene graphics…', async g => replayArt.set(g, await replayJson(`replay-art.json?g=${g}`)));
   document.getElementById('replay-title').textContent = 'Loading combat effects…';
-  await replayWarmEffects(data);
-  const a = data.header.arena, f = a.floor;
-  data.center = { x: f[0] + Math.floor(f[2] / 2), y: f[1] + Math.floor(f[3] / 2), z: a.z };
+  await replayWarmEffects({ visuals: data.visuals.filter(ev => ev.t <= 1000) });
   document.getElementById('replay-title').textContent = 'Loading arena terrain…';
-  data.terrain = await replayJson(`terrain.json?x=${data.center.x}&y=${data.center.y}&z=${a.z}&map=0&season=0`);
+  data.terrain = await terrain;
   replayData = data; replayTime = 0; replaySoundTime = -1; replayLastWorld = null; replayLastDraw = -1;
   replayResetEffects(); anim.clear(); dyingMobs.clear();
   document.getElementById('replay-seek').max = String(data.end.t);
@@ -302,6 +337,11 @@ function replayTravelMs(data, ev) {
 function replayDraw() {
   if (!replayData) return;
   const data = replayData;
+  if (!replayBufferReady(data, replayTime, replayTime)) {
+    document.getElementById('replay-buffer').textContent = ' · Buffering combat effects…';
+    return;
+  }
+  document.getElementById('replay-buffer').textContent = '';
   replayClockMs = replayTime + 1000;
   const load = replayAt(data.loads, replayTime) || data.header;
   const mobiles = [];
@@ -438,7 +478,7 @@ async function replayStart() {
   document.body.appendChild(result);
   const stats = document.createElement('div'); stats.id = 'replay-stats'; document.body.appendChild(stats);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
-  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play" disabled>Play</button><button id="replay-retry" hidden>Retry loading</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><button id="replay-sound">Sound on</button><button id="replay-like" aria-label="Like this replay" aria-pressed="false" disabled>♡ Like</button><span id="replay-like-status" role="status"></span><div id="replay-error" role="alert"></div>';
+  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play" disabled>Play</button><button id="replay-retry" hidden>Retry loading</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><span id="replay-buffer" role="status"></span><button id="replay-sound">Sound on</button><button id="replay-like" aria-label="Like this replay" aria-pressed="false" disabled>♡ Like</button><span id="replay-like-status" role="status"></span><div id="replay-error" role="alert"></div>';
   document.body.appendChild(ui);
   const error = e => {
     document.getElementById('replay-error').textContent = e.message;
@@ -465,18 +505,24 @@ async function replayStart() {
   function tick(real) {
     const dt = replayLastReal ? Math.min(100, real - replayLastReal) : 0; replayLastReal = real;
     if (replayPlaying && replayData) {
-      replayTime = Math.min(replayData.end.t, replayTime + dt * replayRate);
+      const next = Math.min(replayData.end.t, replayTime + dt * replayRate);
+      const ready = replayBufferReady(replayData, replayTime, next);
+      document.getElementById('replay-buffer').textContent = ready ? '' : ' · Buffering combat effects…';
+      if (ready) replayTime = next;
       if (replayTime >= replayData.end.t) { replayPlaying = false; stopSoundEffects(); document.getElementById('replay-play').textContent = 'Play'; }
     }
-    if (real - lastPaint >= 30) { try { replayDraw(); } catch (err) { replayPlaying = false; error(err); } lastPaint = real; }
+    if (real - lastPaint >= 30) { try { if (replayData && !replayPlaying) replayBufferReady(replayData, replayTime, replayTime); replayDraw(); } catch (err) { replayPlaying = false; error(err); } lastPaint = real; }
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
   const params = new URLSearchParams(location.search), id = params.get('replay');
   if (/^[0-9a-f]{32}$/.test(id || '')) {
+    const loadingStarted = performance.now();
+    void replayLoadPack();
     try { const base = new URL(params.get('api') || location.origin); if (!/^https?:$/.test(base.protocol)) throw new Error('Invalid API URL');
       await replayLoad(await replayFetch(new URL(`/duel/replays/${id}.jsonl`, base)));
       document.body.dataset.replayReady = 'true';
+      document.body.dataset.replayLoadMs = String(Math.round(performance.now() - loadingStarted));
       document.getElementById('replay-play').disabled = false;
       if (params.get('thumbnail') !== '1') { void replaySetupLike(id); replaySetupReport(id); replaySeek(replayTimestamp(params.get('t'),replayData.end.t)); }
       if (params.get('thumbnail') === '1') {

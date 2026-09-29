@@ -209,3 +209,39 @@ test('combat texture preload shows progress and stops on deadline', async () => 
   const error = await pending;
   ok(/could not load/.test(error.message));
 });
+
+test('optional replay pack shares a request and seeds metadata and texture aliases', async () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.set('AbortController', AbortController);
+  const aliases = []; let calls = 0;
+  ctx.set('PIXI', {Assets:{add:entry=>aliases.push(entry)}});
+  ctx.set('fetch', async () => { calls++; return {ok:true,json:async()=>({schema:1,json:{'replay-art.json?g=42':{frames:[42]}},images:{'art/static/42.png':'data:image/png;base64,AAAA'}})}; });
+  await ctx.run('Promise.all([replayLoadPack(), replayLoadPack()])');
+  const meta = await ctx.run('replayJson("replay-art.json?g=42")');
+  eq(calls, 1); eq(meta.frames[0],42); eq(aliases.length,1); eq(aliases[0].alias,'art/static/42.png');
+});
+
+test('missing optional replay pack falls back to ordinary metadata requests', async () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.set('AbortController', AbortController);
+  let calls = 0;
+  ctx.set('fetch', async () => { calls++; if(calls===1) throw new Error('offline'); return {ok:true,json:async()=>({frames:[42]})}; });
+  await ctx.run('replayLoadPack()');
+  eq((await ctx.run('replayJson("replay-art.json?g=42")')).frames[0],42);
+  eq(calls,2);
+});
+
+test('replay buffers approaching effects without downloading the whole match', () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  const cache = new Map(), requested=[];
+  ctx.set('texCache',cache);ctx.set('texFor',url=>requested.push(url));
+  ctx.set('effectTextureUrl',g=>'effect/'+g);
+  ctx.set('record',{visuals:[{t:5000,g:42},{t:9000,g:43},{t:60000,g:44}]});
+  ok(ctx.run('replayBufferReady(record,0,100)'));
+  ok(requested.includes('effect/42'));ok(!requested.includes('effect/44'));
+  ok(!ctx.run('replayBufferReady(record,4990,5010)'), 'do not skip a missing effect');
+  cache.set('effect/42',{});
+  ok(ctx.run('replayBufferReady(record,4990,5010)'));
+  ok(ctx.run('replayEffectTextures.has("effect/43")'));
+  ok(!ctx.run('replayBufferReady(record,60000,60000)'), 'seeking also waits for the target effect');
+});
