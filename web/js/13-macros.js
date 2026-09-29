@@ -27,6 +27,7 @@ let macrosOn = false;
 let warOn = 0;                  // local guess of war stance, for { t:"war", on:"toggle" }
 let mcPending = null;           // trigger captured in the editor's key field, pending "Add"
 let mcSteps = [];               // steps staged in the editor, pending "Add"
+let mcEditing = null;          // id being edited; saved only when Save is pressed
 let mcRowUsed = false;          // the visible verb row has already been staged as a step
 
 // Keys macros may NOT override: movement (KEY_DIR) + the bound window/chat/editor
@@ -73,9 +74,15 @@ const MACRO_VERBS = [
     build: ([v]) => (v.trim() ? { t: "emote", text: v.trim() } : null),
     text: (a) => `emote ${a.text}`,
     run: (a) => { if (a.text) sendInput("animate:" + a.text); return 0; } },
-  { t: "cast", label: "cast spell", params: [{ kind: "int", ph: "spell id" }],
-    build: ([v]) => ({ t: "cast", id: v }), text: (a) => `cast #${a.id}`,
+  { t: "cast", label: "cast spell", params: [{ kind: "select", opts: MAGERY_PAIRS.map(([id, name]) => [String(id), name]) }],
+    build: ([v]) => ({ t: "cast", id: +v }), text: (a) => `cast ${MAGERY_SPELLS[a.id - 1] || "#" + a.id}`,
     run: (a) => { castSpell(a.id); return 0; } },
+  { t: "castself", label: "cast on self", params: [{ kind: "select", opts: MAGERY_PAIRS.map(([id, name]) => [String(id), name]) }],
+    build: ([v]) => ({ t: "castself", id: +v }), text: a => `self: ${MAGERY_SPELLS[a.id - 1] || a.id}`,
+    run: a => { sendInput("tspell:" + a.id + ":0"); return 0; } },
+  { t: "potion", label: "drink potion", params: [{ kind: "select", opts: [[String(0x0F0C), "Heal"], [String(0x0F07), "Cure"], [String(0x0F0B), "Refresh"]] }],
+    build: ([v]) => ({ t: "potion", graphic: +v }), text: a => "drink " + ({[0x0F0C]: "heal", [0x0F07]: "cure", [0x0F0B]: "refresh"}[a.graphic] || "potion"),
+    run: a => { const item = cbFind(a.graphic, null); if (item) sendInput("use:" + (item.serial >>> 0)); else setStatus("No matching potion in your backpack."); return 0; } },
   { t: "skill", label: "use skill", params: [{ kind: "int", ph: "skill id" }],
     build: ([v]) => ({ t: "skill", id: v }), text: (a) => `use skill #${a.id}`,
     run: (a) => { sendInput("useskill:" + a.id); return 0; } },
@@ -108,6 +115,8 @@ const MACRO_VERBS = [
     run: () => { sendInput("lastweapon"); return 0; } },
   { t: "allnames", label: "all names", text: () => "all names",
     run: () => { sendInput("allnames"); return 0; } },
+  { t: "lasttarget", label: "target last", text: () => "target last",
+    run: () => { targetLast(); return 0; } },
   { t: "attacklast", label: "attack last target", text: () => "attack last target",
     run: () => { sendInput("attacklast"); return 0; } },
   // ClassicUO `MacroType.BandageSelf` on a 5.0.2.0+ client: find the bandages and
@@ -191,6 +200,8 @@ function validSavedMacroAction(a) {
     case "say": return prefText(a.text, 128);
     case "emote": return prefText(a.text, 32);
     case "send": return prefText(a.cmd, 128);
+    case "castself": return prefInteger(a.id, 1, 64);
+    case "potion": return [0x0F0C, 0x0F07, 0x0F0B].includes(a.graphic);
     case "cast": case "skill": case "ability": case "virtue": return prefInteger(a.id);
     case "war": return ["toggle", 0, 1].includes(a.on);
     case "open": return Object.hasOwn(OPEN_FNS, a.win);
@@ -201,6 +212,8 @@ function validSavedMacroAction(a) {
 }
 preferenceStorage.json(MACRO_KEY, v => prefArray(v, m => {
   if (!prefObject(m) || (!prefText(m.id, 128) && !prefInteger(m.id, 0, Number.MAX_SAFE_INTEGER))) return false;
+  if (m.name !== undefined && !prefText(m.name, 64)) return false;
+  if (m.enabled !== undefined && typeof m.enabled !== "boolean") return false;
   const triggers = [prefText(m.key, 64) && !!m.key, [1, 3, 4].includes(m.button), ["up", "down"].includes(m.wheel)];
   if (triggers.filter(Boolean).length !== 1 || ["ctrl", "alt", "shift"].some(k => m[k] !== undefined && typeof m[k] !== "boolean")) return false;
   if (Object.hasOwn(m, "actions") && !Array.isArray(m.actions)) return false;
@@ -246,21 +259,21 @@ function macroSummary(m) {
 // Modifiers must match exactly, as ClassicUO's FindMacro does (`obj.Alt == alt
 // && obj.Ctrl == ctrl && obj.Shift == shift`).
 function modsMatch(m, e) {
-  return !!m.ctrl === e.ctrlKey && !!m.alt === e.altKey && !!m.shift === e.shiftKey;
+  return !e.metaKey && !!m.ctrl === e.ctrlKey && !!m.alt === e.altKey && !!m.shift === e.shiftKey;
 }
 // Find a macro matching this keydown (reserved keys never match).
 function macroFor(e) {
-  if (RESERVED_CODES.has(e.code)) return null;
-  for (const m of macros) if (!m.wheel && m.button == null && m.key === e.code && modsMatch(m, e)) return m;
+  if (e.metaKey || RESERVED_CODES.has(e.code)) return null;
+  for (const m of macros) if (m.enabled !== false && !m.wheel && m.button == null && m.key === e.code && modsMatch(m, e)) return m;
   return null;
 }
 function macroForButton(button, e) {
-  for (const m of macros) if (m.button === button && modsMatch(m, e)) return m;
+  for (const m of macros) if (m.enabled !== false && m.button === button && modsMatch(m, e)) return m;
   return null;
 }
 function macroForWheel(up, e) {
   const w = up ? "up" : "down";
-  for (const m of macros) if (m.wheel === w && modsMatch(m, e)) return m;
+  for (const m of macros) if (m.enabled !== false && m.wheel === w && modsMatch(m, e)) return m;
   return null;
 }
 
@@ -311,21 +324,59 @@ function toggleMacros() {
   macrosOn = !macrosOn;
   const w = document.getElementById("macros");
   w.classList.toggle("on", macrosOn);
-  if (macrosOn) { renderMacroList(); renderMacroSteps(); document.getElementById("mc-key").focus(); }
+  if (macrosOn) { bringToFront(w); renderMacroList(); renderMacroSteps(); document.getElementById("mc-key").focus(); }
 }
 function closeMacros() { macrosOn = false; document.getElementById("macros").classList.remove("on"); }
+function sameMacroTrigger(a, b) {
+  return (a.key || null) === (b.key || null) && (a.button ?? null) === (b.button ?? null)
+    && (a.wheel || null) === (b.wheel || null) && !!a.ctrl === !!b.ctrl && !!a.alt === !!b.alt && !!a.shift === !!b.shift;
+}
+function macroConflict(trigger, exceptId = null) {
+  return macros.find(m => m.id !== exceptId && m.enabled !== false && sameMacroTrigger(m, trigger));
+}
+function resetMacroDraft() {
+  mcEditing = null; mcPending = null; mcSteps = []; mcRowUsed = false;
+  document.getElementById("mc-key").value = "";
+  document.getElementById("mc-name").value = "";
+  document.getElementById("mc-add-btn").textContent = "Add macro";
+  document.getElementById("mc-cancel-btn").hidden = true;
+  renderMacroSteps();
+}
+function editMacro(m) {
+  mcEditing = m.id;
+  mcPending = { key: m.key, button: m.button, wheel: m.wheel, ctrl: !!m.ctrl, alt: !!m.alt, shift: !!m.shift };
+  mcSteps = macroActions(m).map(a => ({ ...a })); mcRowUsed = true;
+  document.getElementById("mc-name").value = m.name || "";
+  document.getElementById("mc-key").value = triggerLabel(m);
+  document.getElementById("mc-add-btn").textContent = "Save changes";
+  document.getElementById("mc-cancel-btn").hidden = false;
+  document.getElementById("mc-msg").textContent = "Editing " + (m.name || triggerLabel(m)) + ". Changes apply when saved.";
+  renderMacroSteps();
+}
 function renderMacroList() {
   const list = document.getElementById("mc-list");
   if (!macros.length) { list.innerHTML = '<div class="mc-empty">no macros yet — add one below</div>'; return; }
   list.innerHTML = "";
-  for (const m of macros) {
+  const query = (document.getElementById("mc-search")?.value || "").toLowerCase();
+  const shown = macros.filter(m => [m.name || "", triggerLabel(m), macroSummary(m)].join(" ").toLowerCase().includes(query));
+  if (!shown.length) { list.textContent = "No matching hotkeys."; return; }
+  for (const m of shown) {
     const row = document.createElement("div");
     row.className = "mc-row";
     const combo = document.createElement("span"); combo.className = "mc-combo"; combo.textContent = triggerLabel(m);
-    const act = document.createElement("span"); act.className = "mc-act"; act.textContent = macroSummary(m);
-    const del = document.createElement("span"); del.className = "mc-del"; del.textContent = "✕"; del.title = "delete";
-    del.addEventListener("click", () => { macros = macros.filter((x) => x.id !== m.id); saveMacros(); renderMacroList(); });
-    row.append(combo, act, del);
+    const act = document.createElement("span"); act.className = "mc-act"; act.textContent = (m.name ? m.name + " · " : "") + macroSummary(m); act.title = act.textContent;
+    const edit = document.createElement("button"); edit.type = "button"; edit.className = "mc-del"; edit.textContent = "Edit";
+    edit.addEventListener("click", () => editMacro(m));
+    const enabled = document.createElement("button"); enabled.type = "button"; enabled.className = "mc-del";
+    enabled.textContent = m.enabled === false ? "Off" : "On"; enabled.setAttribute("aria-pressed", String(m.enabled !== false));
+    enabled.addEventListener("click", () => {
+      const conflict = macroConflict(m, m.id);
+      if (m.enabled === false && conflict) { document.getElementById("mc-msg").textContent = "Already bound: " + triggerLabel(conflict); return; }
+      m.enabled = m.enabled === false; stopMacro(); saveMacros(); renderMacroList();
+    });
+    const del = document.createElement("button"); del.type = "button"; del.className = "mc-del"; del.textContent = "✕"; del.title = "delete";
+    del.addEventListener("click", () => { macros = macros.filter((x) => x.id !== m.id); if (mcEditing === m.id) resetMacroDraft(); stopMacro(); saveMacros(); renderMacroList(); });
+    row.append(combo, act, edit, enabled, del);
     list.appendChild(row);
   }
 }
@@ -341,9 +392,12 @@ function renderMacroSteps() {
     row.className = "mc-step";
     const n = document.createElement("span"); n.className = "mc-stepn"; n.textContent = (i + 1) + ".";
     const t = document.createElement("span"); t.className = "mc-act"; t.textContent = actionSummary(a);
-    const del = document.createElement("span"); del.className = "mc-del"; del.textContent = "✕"; del.title = "remove step";
+    const del = document.createElement("button"); del.type = "button"; del.className = "mc-del"; del.textContent = "✕"; del.title = "remove step";
     del.addEventListener("click", () => { mcSteps.splice(i, 1); renderMacroSteps(); });
-    row.append(n, t, del);
+    const up = document.createElement("button"); up.type = "button"; up.className = "mc-del"; up.textContent = "↑"; up.title = "Move step up";
+    up.disabled = i === 0;
+    up.addEventListener("click", () => { if (i > 0) { [mcSteps[i - 1], mcSteps[i]] = [mcSteps[i], mcSteps[i - 1]]; renderMacroSteps(); } });
+    row.append(n, t, up, del);
     el.appendChild(row);
   });
 }
@@ -404,18 +458,24 @@ function setupMacroEditor() {
     e.preventDefault(); e.stopPropagation();
     if (e.code === "Escape") { mcPending = null; keyInput.value = ""; return; }
     if (/^(Control|Alt|Shift|Meta)/.test(e.code)) return;   // ignore bare modifier presses
+    if (e.metaKey) { msg.textContent = "Command/Meta shortcuts belong to the app. Use Control, Option/Alt or Shift."; return; }
     mcPending = { key: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
     keyInput.value = triggerLabel(mcPending);
+    const conflict = macroConflict(mcPending, mcEditing);
+    msg.textContent = RESERVED_CODES.has(e.code) ? codeLabel(e.code) + " is reserved for movement or a window. Try F1–F8 or 1–8."
+      : conflict ? "Already bound to " + (conflict.name || macroSummary(conflict)) + ". Edit that binding or choose another key." : "";
   });
   keyInput.addEventListener("mousedown", (e) => {
     if (!(e.button in MOUSE_LABEL)) return;                 // left/right stay the world's
     e.preventDefault(); e.stopPropagation();
+    if (e.metaKey) { msg.textContent = "Use Control, Option/Alt or Shift instead of Command/Meta."; return; }
     mcPending = { button: e.button, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
     keyInput.value = triggerLabel(mcPending);
   });
   keyInput.addEventListener("wheel", (e) => {
     e.preventDefault(); e.stopPropagation();
     if (!e.deltaY) return;
+    if (e.metaKey) { msg.textContent = "Use Control, Option/Alt or Shift instead of Command/Meta."; return; }
     mcPending = { wheel: e.deltaY < 0 ? "up" : "down", ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey };
     keyInput.value = triggerLabel(mcPending);
   }, { passive: false });
@@ -442,6 +502,8 @@ function setupMacroEditor() {
     if (mcPending.key && RESERVED_CODES.has(mcPending.key)) {
       msg.textContent = codeLabel(mcPending.key) + " is reserved — pick another key."; return;
     }
+    const conflict = macroConflict(mcPending, mcEditing);
+    if (conflict) { msg.textContent = triggerLabel(mcPending) + " is already bound to " + (conflict.name || macroSummary(conflict)) + "."; return; }
     const actions = mcSteps.slice();
     // Anything still showing in the param row is the last (or only) step — unless
     // "Add step" already took it, which is the only way a parameterless verb
@@ -450,18 +512,68 @@ function setupMacroEditor() {
     if (trailing) actions.push(trailing);
     else if (!actions.length) return;         // nothing staged AND nothing valid showing
     else msg.textContent = "";                // staged steps are enough; ignore the empty row
-    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    macros.push({ id, key: mcPending.key, button: mcPending.button, wheel: mcPending.wheel,
-                  ctrl: mcPending.ctrl, alt: mcPending.alt, shift: mcPending.shift, actions });
-    saveMacros();
-    mcPending = null; keyInput.value = "";
-    mcSteps = []; mcRowUsed = false; renderMacroSteps();
+    if (!actions.length || actions.length > MACRO_STEPS_MAX) { msg.textContent = `Use 1–${MACRO_STEPS_MAX} steps.`; return; }
+    if (mcEditing === null && macros.length >= 256) { msg.textContent = "A maximum of 256 macros can be stored."; return; }
+    const id = mcEditing ?? Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const updated = { id, name: document.getElementById("mc-name").value.trim().slice(0, 64), enabled: true, key: mcPending.key, button: mcPending.button, wheel: mcPending.wheel,
+                  ctrl: mcPending.ctrl, alt: mcPending.alt, shift: mcPending.shift, actions };
+    if (mcEditing !== null) macros = macros.map(m => m.id === mcEditing ? updated : m);
+    else macros.push(updated);
+    stopMacro(); saveMacros(); resetMacroDraft();
+    msg.textContent = "Saved. Close this window and press " + triggerLabel(updated) + " in the game.";
     for (const el of document.querySelectorAll("#mc-param .mc-pv")) if (el.tagName === "INPUT") el.value = "";
     renderMacroList();
   });
+  document.getElementById("mc-search").addEventListener("input", renderMacroList);
+  document.getElementById("mc-cancel-btn").addEventListener("click", () => { resetMacroDraft(); msg.textContent = "Changes cancelled."; });
+  document.getElementById("mc-preset").addEventListener("change", renderMacroPreset);
+  document.getElementById("mc-preset-apply").addEventListener("click", installMacroPreset);
+  document.getElementById("mc-backup").addEventListener("click", () => { closeMacros(); openPreferencePanel(); });
+  renderMacroPreset();
   document.getElementById("mc-close").addEventListener("click", closeMacros);
   makeDraggable(win, document.getElementById("mc-title"));
 }
+// Presets add only free triggers, never replace a player's existing bindings.
+const ARENA_MACRO_PRESETS = {
+  mage: [
+    ["F1", "Greater Heal self", [{ t: "castself", id: 29 }]],
+    ["F2", "Cure self", [{ t: "castself", id: 11 }]],
+    ["F3", "Energy Bolt", [{ t: "cast", id: 42 }]],
+    ["F4", "Explosion", [{ t: "cast", id: 43 }]],
+    ["F5", "Magic Arrow", [{ t: "cast", id: 5 }]],
+    ["F6", "Meditation", [{ t: "skill", id: 46 }]],
+    ["F7", "Target last", [{ t: "lasttarget" }]],
+    ["F8", "Arena menu", [{ t: "say", text: "[Arena" }]],
+  ],
+  warrior: [
+    ["F1", "Bandage self", [{ t: "bandageself" }]],
+    ["F2", "Attack last", [{ t: "attacklast" }]],
+    ["F3", "Equip last weapon", [{ t: "lastweapon" }]],
+    ["F4", "Target last", [{ t: "lasttarget" }]],
+    ["F5", "Heal potion (practice)", [{ t: "potion", graphic: 0x0F0C }]],
+    ["F6", "Cure potion (practice)", [{ t: "potion", graphic: 0x0F07 }]],
+    ["F7", "Refresh potion (practice)", [{ t: "potion", graphic: 0x0F0B }]],
+    ["F8", "Arena menu", [{ t: "say", text: "[Arena" }]],
+  ],
+};
+function renderMacroPreset() {
+  const rows = ARENA_MACRO_PRESETS[document.getElementById("mc-preset").value] || [];
+  document.getElementById("mc-preset-preview").textContent = rows.map(([key, name]) => key + " " + name).join(" · ")
+    + " — Occupied keys will be skipped. On macOS, hold Fn if the function keys control media.";
+}
+function installMacroPreset() {
+  const rows = ARENA_MACRO_PRESETS[document.getElementById("mc-preset").value] || [];
+  let added = 0; const skipped = [];
+  for (const [key, name, actions] of rows) {
+    if (macroConflict({ key }) || macros.length >= 256) { skipped.push(key); continue; }
+    macros.push({ id: "arena-" + Date.now().toString(36) + "-" + key, name, key, enabled: true,
+      ctrl: false, alt: false, shift: false, actions: actions.map(a => ({ ...a })) });
+    added++;
+  }
+  saveMacros(); renderMacroList();
+  document.getElementById("mc-msg").textContent = added + " hotkeys added." + (skipped.length ? " Kept existing bindings: " + skipped.join(", ") + "." : "");
+}
+
 // Spell quick-cast chord: press K, then a circle digit (1-8), then a spell digit
 // (1-8) → cast that Magery spell by position. E.g. K 1 1 = Clumsy, K 1 2 = Create
 // Food, K 8 8 = Water Elemental. Active for ~1.5s after each key.
@@ -1212,6 +1324,7 @@ function pushChatHistory(mode, text) {
   chatHistoryIdx = chatHistory.length;
 }
 function sendInput(cmd) {
+  if (REPLAY_MODE) return;
   if (typeof sceneReloading !== "undefined" && sceneReloading) return;
   if (typeof sceneTransportAvailable !== "undefined" && !sceneTransportAvailable) return;
   if (WASM_MODE) wasmSendInput(cmd);

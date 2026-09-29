@@ -212,3 +212,9 @@ data files (`.mul`/`.uop` — art, maps, animation, sound, clilocs) are
 copyrighted by Broadsword/EA and are neither included nor redistributable: you
 supply your own UO installation and point the tools at it (see the `play`
 binary's `data_dir` argument). Nothing here grants any right to that content.
+
+### Arena hotkeys
+
+Press **O** for named, searchable hotkeys with editing, conflict checks, enable/
+disable controls and mage/warrior duel presets. Existing bindings are preserved
+when installing a preset. See [Arena hotkeys](docs/ARENA_HOTKEYS.md).

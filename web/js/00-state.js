@@ -1,3 +1,7 @@
+// Replay owns a simulation clock and never opens a shard session.
+const REPLAY_MODE = new URLSearchParams(location.search).has("replay");
+let replayClockMs = 1000;
+function visualNow() { return REPLAY_MODE ? replayClockMs : performance.now(); }
 // anima-client renderer — isometric, real UO sprites, smooth (interpolated) camera.
 //
 // Tiles/statics live in ABSOLUTE world-iso coordinates in a persistent pool: as

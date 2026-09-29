@@ -30,9 +30,9 @@ function stopSoundEffects() {
   activeSfx.clear();
 }
 function soundPlaybackAllowed() {
-  return !audioMuted && settings.sfx &&
+  return !audioMuted && settings.sfx && (REPLAY_MODE || (
     !(typeof sceneReloading !== "undefined" && sceneReloading) &&
-    !(typeof sceneTransportAvailable !== "undefined" && !sceneTransportAvailable);
+    !(typeof sceneTransportAvailable !== "undefined" && !sceneTransportAvailable)));
 }
 function ensureAudioCtx() {
   if (audioCtx) return audioCtx;

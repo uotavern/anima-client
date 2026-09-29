@@ -33,7 +33,7 @@ const PAGE = path.join(WEB, "index.html");
 function pageScripts() {
   const html = fs.readFileSync(PAGE, "utf8");
   const files = [...html.matchAll(/<script\s+src="([^"]+)"\s*>\s*<\/script>/g)]
-    .map((m) => m[1])
+    .map((m) => m[1].split("?")[0])
     .filter((src) => !src.startsWith("vendor/"));
   if (!files.length) throw new Error("web/test: no <script src> tags found in web/index.html");
   return files;

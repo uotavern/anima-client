@@ -1337,7 +1337,7 @@ function drawMobs() {
     // move a tile — a real step is always more authoritative than the flash.
     let faceDir = st.dir;
     if (st.faceOverride) {
-      if (performance.now() < st.faceOverride.until) faceDir = st.faceOverride.dir;
+      if (visualNow() < st.faceOverride.until) faceDir = st.faceOverride.dir;
       else st.faceOverride = null;
     }
     // We only know run/mount state for our own player; other mobiles walk/stand.
@@ -1368,7 +1368,7 @@ function drawMobs() {
     const seat = (!ghost && !mounted) ? seatForEntity(st, ent, faceDir & 7, isSelf) : null;
     const d = seat ? seat.dir : (faceDir & 7);
     const moving = seat ? false : !!st.animMoving; // set in renderFrame (glide + held/mouse)
-    const running = isSelf && !!(moveIntent && moveIntent.run);
+    const running = REPLAY_MODE ? !!(ent && ent.run) : isSelf && !!(moveIntent && moveIntent.run);
     const bodyAnim = ghost ? ghostAnimationBody(st.body) : (st.body | 0);
     // Hidden (mobile-update status-flags 0x80: Hiding/stealth skill, or a GM
     // `[set Hidden true`). Seeing it at all means the server allows us to
@@ -1380,10 +1380,10 @@ function drawMobs() {
     const atype = ghost ? 2 : (st.at != null ? (st.at | 0) : null);
     // War-mode combat stance applies to our own avatar (the only mobile whose war
     // state the server tells us); others fall back to the normal idle stand.
-    const inWar = isSelf && !!(scene && scene.war);
+    const inWar = REPLAY_MODE ? !!(ent && ent.war) : isSelf && !!(scene && scene.war);
     // Fidget when nothing else is happening. Runs before `st.act` is read below,
     // so a fidget that fires this frame starts on this frame.
-    tickIdleAnim(st, performance.now(), bodyAnim, moving, mounted, inWar,
+    if (!REPLAY_MODE) tickIdleAnim(st, visualNow(), bodyAnim, moving, mounted, inWar,
                  !!(ent && ent.fly), ghost);
     // A one-shot 0x6E action (combat swing, bow, get-hit) takes over the pose while
     // it plays, then expires → revert to walk/stand/war. We only retire it once the
@@ -1413,7 +1413,7 @@ function drawMobs() {
         framesFor(bodyAnim, ag, d); // kick the frame-count/centers load
         const fk = `${bodyAnim}/${ag}/${d}`;
         const loaded = frameCount.has(fk) ? Math.max(1, frameCount.get(fk)) : 0;
-        const fi = Math.floor((performance.now() - act.startMs) / act.frameMs);
+        const fi = Math.floor((visualNow() - act.startMs) / act.frameMs);
         if (loaded > 0 && fi >= loaded) st.act = null; // played every frame → done
       }
     }
@@ -1424,7 +1424,7 @@ function drawMobs() {
       // ClassicUO removing the body once `frameIndex >= fc`.
       group = st.death.dg;
       frames = framesFor(bodyAnim, group, d);
-      const fi = Math.floor((performance.now() - st.death.startMs) / CHAR_ANIM_DELAY);
+      const fi = Math.floor((visualNow() - st.death.startMs) / CHAR_ANIM_DELAY);
       frame = Math.max(0, Math.min(frames - 1, fi));
       if (st.prevFrameKey !== `${group}/${d}`) {
         for (let f = 0; f < frames; f++) texFor(`anim/${bodyAnim}/${group}/${d}/${f}.png`);
@@ -1435,7 +1435,7 @@ function drawMobs() {
     } else if (st.act && !ghost) {
       group = ag;
       frames = framesFor(bodyAnim, group, d);
-      const fi = Math.max(0, Math.min(frames - 1, Math.floor((performance.now() - act.startMs) / act.frameMs)));
+      const fi = Math.max(0, Math.min(frames - 1, Math.floor((visualNow() - act.startMs) / act.frameMs)));
       frame = act.fwd ? fi : (frames - 1 - fi);
       if (st.prevFrameKey !== `${group}/${d}`) {
         for (let f = 0; f < frames; f++) texFor(`anim/${bodyAnim}/${group}/${d}/${f}.png`);
