@@ -177,3 +177,35 @@ test('shared replay moments clamp to the archive and reject invalid time', () =>
     ctx.set('query',value);eq(ctx.run('replayTimestamp(query, 20000)'),0);
   }
 });
+
+test('replay metadata coalesces requests and retries rejected assets', async () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.set('AbortController', AbortController);
+  let calls = 0;
+  ctx.set('fetch', async () => { calls++; return {ok: calls > 1, status:503, json:async()=>({frames:[42]})}; });
+  await ctx.run('replayJson("same").catch(() => null)');
+  await ctx.run('Promise.all([replayJson("same"), replayJson("same")])');
+  eq(calls, 2);
+});
+
+test('replay metadata bounds parallel work and reports completed progress', async () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.run('var title=document.createElement("div"); title.id="replay-title"; document.body.appendChild(title)');
+  let active = 0, peak = 0;
+  ctx.set('loader', async () => { peak=Math.max(peak,++active); await Promise.resolve(); active--; });
+  await ctx.run('replayLoadBatch([1,2,3,4,5,6,7,8,9], "Loading", loader)');
+  eq(peak, 4); eq(ctx.run('title.textContent'), 'Loading 9 / 9');
+});
+
+test('combat texture preload shows progress and stops on deadline', async () => {
+  const ctx = newContext().load('00-state.js', '15-replay.js');
+  ctx.run('var title=document.createElement("div"); title.id="replay-title"; document.body.appendChild(title)');
+  ctx.set('texCache', new Map());
+  ctx.set('texFor', () => null);
+  ctx.set('effectTextureUrl', () => 'effect.png');
+  const pending = ctx.run('replayWarmEffects({visuals:[{g:42,kind:0}]})').catch(e => e);
+  eq(ctx.run('title.textContent'), 'Loading combat effects… 0 / 1');
+  ctx.advance(60001); await ctx.flush();
+  const error = await pending;
+  ok(/could not load/.test(error.message));
+});
