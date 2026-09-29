@@ -545,10 +545,9 @@ pub(super) fn handle_request(ctx: Ctx) {
         let (frames, interval) = terrain
             .as_ref()
             .and_then(|t| {
-                let state = t.lock().ok()?;
+                let mut state = t.lock().ok()?;
                 state
-                    .animdata
-                    .as_ref()
+                    .animdata()
                     .map(|a| (a.frame_sequence(g), a.frames(g).1))
             })
             .unwrap_or((vec![g], 0));

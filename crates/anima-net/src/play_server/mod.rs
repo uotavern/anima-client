@@ -143,6 +143,19 @@ pub(super) struct TerrainState {
 }
 
 impl TerrainState {
+    /// The animdata reader, opened on first use like the rest of `readers`
+    /// (`GET /replay-art.json` reads animated-static frames from it).
+    pub(super) fn animdata(&mut self) -> Option<&AnimData> {
+        let TerrainState {
+            data_dir, readers, ..
+        } = self;
+        let data_dir: &PathBuf = data_dir;
+        readers
+            .get_or_insert_with(|| (Multis::open(data_dir).ok(), AnimData::open(data_dir).ok()))
+            .1
+            .as_ref()
+    }
+
     /// Load `facet` on first use, then hand `&mut MapData` plus the shared
     /// multi/animdata readers to `f`. Split-borrows the struct fields so the
     /// callback can hold all three at once (a `&mut self` helper cannot).
