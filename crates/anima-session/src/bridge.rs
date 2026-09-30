@@ -247,7 +247,10 @@ pub fn run(bin_name: &'static str, spectator: impl FnOnce(&str) -> Option<Box<dy
                 emit(&json!({ "ok": true, "bye": true }));
                 break;
             }
-            Err(e) => emit(&json!({ "ok": false, "error": e })),
+            Err(e) => emit(&json!({
+                "ok": false, "error": e,
+                "diagnostics": session.as_ref().map(transport_diagnostics),
+            })),
         }
     }
 }
@@ -417,7 +420,25 @@ fn ready_event(player: &Value) -> Value {
     json!({
         "event": "ready",
         "schema_version": SCHEMA_VERSION,
+        "bridge_protocol": 2,
+        "capabilities": ["transport_diagnostics", "absolute_journal_cursor"],
         "player": player,
+    })
+}
+
+fn transport_diagnostics(session: &Session) -> Value {
+    let decoder = session.decoder.diagnostics();
+    json!({
+        "bytes_in": session.stats.bytes_in,
+        "bytes_out": session.stats.bytes_out,
+        "packets_in": session.stats.packets_in,
+        "packets_out": session.stats.packets_out,
+        "journal_cursor": session.journal_cursor,
+        "journal_retained": session.world.journal.len(),
+        "compressed_bytes": decoder.compressed_bytes,
+        "decoded_bytes": decoder.decoded_bytes,
+        "pending_opcode": decoder.pending_opcode,
+        "pending_frame_length": decoder.pending_frame_length,
     })
 }
 
@@ -451,9 +472,8 @@ fn handle(
                 _ => session.observation(),
             };
             crate::localize(&mut obs, cliloc);
-            Ok(Some(
-                json!({ "ok": true, "obs": observation_to_json(&obs) }),
-            ))
+            Ok(Some(json!({ "ok": true, "obs": observation_to_json(&obs),
+                        "diagnostics": transport_diagnostics(session) })))
         }
         "act" => {
             let action = action_from_json(msg.get("action").ok_or("missing 'action'")?)?;
@@ -469,7 +489,8 @@ fn handle(
             // with nothing outstanding (no cursor, prompt, menu or trade), a
             // local-only close, or a WalkTo that `pump` will walk.
             Ok(Some(
-                json!({ "ok": true, "sent": session.packets_sent() > before }),
+                json!({ "ok": true, "sent": session.packets_sent() > before,
+                        "diagnostics": transport_diagnostics(session) }),
             ))
         }
         "pump" => {
@@ -485,7 +506,8 @@ fn handle(
                     eprintln!("[{}] route error: {e}", name());
                 }
             }
-            Ok(Some(json!({ "ok": true, "applied": applied })))
+            Ok(Some(json!({ "ok": true, "applied": applied,
+                            "diagnostics": transport_diagnostics(session) })))
         }
         other => Err(format!("unknown cmd: {other}")),
     }
@@ -508,6 +530,8 @@ mod tests {
 
         assert_eq!(ready["event"], "ready");
         assert_eq!(ready["schema_version"], SCHEMA_VERSION);
+        assert_eq!(ready["bridge_protocol"], 2);
+        assert_eq!(ready["capabilities"][0], "transport_diagnostics");
         assert_eq!(ready["player"], player);
     }
 }
