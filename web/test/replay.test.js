@@ -245,3 +245,31 @@ test('replay buffers approaching effects without downloading the whole match', (
   ok(ctx.run('replayEffectTextures.has("effect/43")'));
   ok(!ctx.run('replayBufferReady(record,60000,60000)'), 'seeking also waits for the target effect');
 });
+
+test('replay heartbeat cannot rewind a step and travel faces destination direction', () => {
+  const c = newContext().load('00-state.js', '15-replay.js');
+  c.set('track', [
+    {t:9562,pos:[628,862,1],direction:0,alive:true,round:1,phase:'Fighting'},
+    {t:9763,pos:[628,862,1],direction:0,alive:true,round:1,phase:'Fighting'},
+    {t:9866,pos:[629,862,1],direction:130,alive:true,round:1,phase:'Fighting'}
+  ]);
+  c.run('var before = replayMotion(track,replayAt(track,9762),9762); var after = replayMotion(track,replayAt(track,9763),9763)');
+  ok(c.run('after.x >= before.x')); eq(c.run('after.dir'), 2); ok(c.run('after.run'));
+  eq(c.run('replayMotion(track,track[2],9866).x'),629);
+  eq(c.run('replayMotion(track,track[0],9600).moving'),false);
+});
+test('replay does not interpolate round transitions teleports or death and seeks deterministically', () => {
+  const c = newContext().load('00-state.js', '15-replay.js');
+  c.set('track', [
+    {t:0,pos:[1,1,0],direction:2,alive:true,round:1,phase:'Fighting'},
+    {t:200,pos:[2,1,0],direction:130,alive:true,round:1,phase:'Fighting'},
+    {t:300,pos:[20,20,0],direction:2,alive:true,round:1,phase:'Fighting'},
+    {t:400,pos:[21,20,0],direction:2,alive:true,round:2,phase:'Countdown'}
+  ]);
+  eq(c.run('replayMotion(track,replayAt(track,250),250).moving'),false);
+  eq(c.run('replayMotion(track,replayAt(track,350),350).moving'),false);
+  eq(c.run('replayMotion(track,{...track[0],paralyzed:true},100).moving'),false);
+  const first = c.run('JSON.stringify(replayMotion(track,track[0],100))');
+  c.run('replayMotion(track,track[3],400)');
+  eq(c.run('JSON.stringify(replayMotion(track,track[0],100))'),first);
+});

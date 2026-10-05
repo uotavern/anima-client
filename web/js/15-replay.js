@@ -12,6 +12,44 @@ function replayAt(rows, t) {
   while (lo < hi) { const mid = (lo + hi) >>> 1; if (rows[mid].t <= t) lo = mid + 1; else hi = mid; }
   return lo ? rows[lo - 1] : null;
 }
+// Position events are arrivals. Heartbeat frames must never restart a step.
+// Keep movement geometry separate from HP/mana/status samples.
+const replayMotionCache = new WeakMap();
+function replayMotionTrack(track) {
+  if (replayMotionCache.has(track)) return replayMotionCache.get(track);
+  const steps = [];
+  let origin = track[0], phase = 0;
+  for (let i = 1; i < track.length; i++) {
+    const row = track[i];
+    const boundary = row.round !== origin.round || row.phase !== origin.phase || row.alive !== origin.alive;
+    const dx = row.pos[0] - origin.pos[0], dy = row.pos[1] - origin.pos[1], dz = row.pos[2] - origin.pos[2];
+    if (!dx && !dy && !dz && !boundary) continue;
+    const run = !!(row.direction & 128);
+    const smooth = !boundary && row.alive && Math.max(Math.abs(dx), Math.abs(dy)) === 1 && Math.abs(dz) <= 16;
+    const start = smooth ? Math.max(origin.t, row.t - (run ? 200 : 400)) : row.t;
+    const cadence = run ? 0.32 : 0.5;
+    steps.push({t:row.t, start, from:origin.pos, to:row.pos, smooth, run,
+      dir:row.direction & 7, round:row.round, phase:row.phase, cycle:phase, cadence});
+    phase = smooth ? (phase + cadence) % 1 : 0;
+    origin = row;
+  }
+  replayMotionCache.set(track, steps);
+  return steps;
+}
+function replayMotion(track, p, t) {
+  const steps = replayMotionTrack(track);
+  let lo = 0, hi = steps.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (steps[mid].t <= t) lo = mid + 1; else hi = mid; }
+  const step = steps[lo];
+  const idle = {x:p.pos[0], y:p.pos[1], z:p.pos[2], moving:false,
+    dir:p.direction & 7, run:!!(p.direction & 128), cycle:0};
+  if (!step || !step.smooth || p.paralyzed || !p.alive || step.round !== p.round || step.phase !== p.phase || t < step.start) return idle;
+  const f = Math.max(0, Math.min(1, (t - step.start) / (step.t - step.start || 1)));
+  return {x:step.from[0] + (step.to[0] - step.from[0]) * f,
+    y:step.from[1] + (step.to[1] - step.from[1]) * f,
+    z:step.from[2] + (step.to[2] - step.from[2]) * f,
+    moving:true, dir:step.dir, run:step.run, cycle:(step.cycle + f * step.cadence) % 1};
+}
 function replayDecode(row) {
   const b = Uint8Array.from(atob(row.packet), c => c.charCodeAt(0));
   const d = new DataView(b.buffer), u16 = o => d.getUint16(o), u32 = o => d.getUint32(o), i8 = o => d.getInt8(o);
@@ -217,17 +255,14 @@ function replayMobile(p, identity, track) {
     p = { ...(replayAt(track, death.t - 1) || p), hits: 0, alive: false };
   }
   const look = replayLooks.get(replayLookKey(identity));
-  const next = track.find(row => row.t > replayTime && (row.pos[0] !== p.pos[0] || row.pos[1] !== p.pos[1]));
-  let x = p.pos[0], y = p.pos[1], z = p.pos[2], moving = false;
-  if (!fallen && !p.paralyzed && next && next.round === p.round && next.phase === p.phase && next.t - p.t <= 400 && Math.max(Math.abs(next.pos[0] - x), Math.abs(next.pos[1] - y)) <= 1) {
-    const f = Math.max(0, Math.min(1, (replayTime - p.t) / (next.t - p.t || 1)));
-    x += (next.pos[0] - x) * f; y += (next.pos[1] - y) * f; z += (next.pos[2] - z) * f; moving = true;
-  }
-  const m = { ...p, ...look, name: identity.name, x, y, z, dir: p.direction & 7, run: !!(p.direction & 128), noto: 5, dead: !p.alive && !fallen };
+  const motion = fallen ? {x:p.pos[0], y:p.pos[1], z:p.pos[2], moving:false,
+    dir:p.direction & 7, run:false, cycle:0} : replayMotion(track, p, replayTime);
+  const {x, y, z, moving} = motion;
+  const m = { ...p, ...look, name: identity.name, x, y, z, dir: motion.dir, run: motion.run, noto: 5, dead: !p.alive && !fallen };
   const id = 'm' + p.serial;
   let st = anim.get(id); if (!st) { st = {}; anim.set(id, st); }
   Object.assign(st, { rx: x, ry: y, rz: z, tx: x, ty: y, z, dir: m.dir, body: m.body, at: m.at,
-    fallback: notoColor(5), animMoving: moving, animPhase: moving ? (replayTime / (m.run ? 400 : 600)) % 1 : 0, mobRec: m });
+    fallback: notoColor(5), animMoving: moving, animPhase: motion.cycle, mobRec: m });
   st.act = null; st.death = null;
   const action = replayAt(replayData.visuals.filter(e => e.serial === p.serial && (e.packetId === 0x6e || e.packetId === 0xe2)), replayTime);
   if (action && !moving && replayTime - action.t < 4000) {
