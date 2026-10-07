@@ -1,6 +1,29 @@
 // Read-only server replay, composed by the same PIXI UO renderer as live play.
 // No fake sprites, no simulation of combat outcomes, and no shard connection.
 let replayData = null, replayTime = 0, replayPlaying = false, replayRate = 1;
+// Embed mode: the viewer inside another page's frame (the arena's Duels page), drawn like a
+// video player: a big play button, a bottom bar that hides while playing, click-to-pause,
+// keyboard shortcuts, fullscreen; the match list, likes and reports stay with the full viewer.
+// `?embed=1` forces it; a frame gets it by default. `?autoplay=1` starts playback once loaded.
+const REPLAY_EMBED = (() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('embed') === '1') return true;
+    if (q.get('embed') === '0') return false;
+    return typeof window !== 'undefined' && window.top !== window.self;
+  } catch { return false; }
+})();
+function replaySetPlaying(on) {
+  if (!replayData) return;
+  if (on && replayTime >= replayData.end.t) replaySeek(0);
+  replayPlaying = on;
+  if (!replayPlaying) stopSoundEffects(); else unlockAudio();
+  const button = document.getElementById('replay-play');
+  if (button) { button.textContent = replayPlaying ? 'Pause' : 'Play'; button.setAttribute('aria-label', replayPlaying ? 'Pause' : 'Play'); }
+  const big = document.getElementById('replay-bigplay');
+  if (big) big.hidden = replayPlaying;
+  document.body.dataset.replayPlaying = String(replayPlaying);
+}
 let replayLastReal = 0, replayLastWorld = null, replayLastDraw = -1, replayLastSyncWall = 0;
 const replaySpeechShown = new Set(), replayStatusLabels = new Map(), replayPotionLabels = new Map();
 let replaySoundTime = 0;
@@ -499,17 +522,63 @@ function replaySetupReport(id) {
   };
 }
 
+function replayEmbedSetup() {
+  const style = document.createElement('style');
+  style.textContent = '#replay-controls{left:0;right:0;bottom:0;padding:6px 12px 10px;border:0;border-radius:0;background:linear-gradient(#0000,#000c 60%);transition:opacity .25s}'
+    + '#replay-controls button,#replay-controls select{margin:4px 6px 4px 0;padding:5px 9px;background:#ffffff22;color:#fff;border:0;border-radius:4px;font:14px system-ui;cursor:pointer}'
+    + '#replay-controls button:hover,#replay-controls select:hover{background:#ffffff3a}#replay-seek{display:block;width:100%;margin:0 0 6px;accent-color:#e5c38b;cursor:pointer}'
+    + '#replay-controls a,#replay-like,#replay-like-status{display:none!important}#replay-time{margin-right:auto;font:13px system-ui}#replay-buffer{font:13px system-ui}'
+    + '#replay-bar{display:flex;align-items:center;flex-wrap:wrap;gap:0 4px}'
+    + '#replay-title{position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 14px;background:linear-gradient(#000c,#0000);color:#fff;font:14px system-ui;text-shadow:0 1px 2px #000;transition:opacity .25s;pointer-events:none}'
+    + '#replay-stats{top:38px;transition:opacity .25s}.replay-fighter{width:190px;padding:7px 8px;font-size:12px;background:#101720c8}.replay-fighter strong{margin-bottom:4px}.replay-resource{height:16px;margin-top:3px}.resource-text{line-height:16px;font-size:11px}'
+    + '#replay-bigplay{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99998;width:84px;height:84px;border:0;border-radius:50%;background:#000a;color:#fff;font:36px/84px system-ui;text-align:center;padding-left:6px;cursor:pointer;box-shadow:0 4px 30px #000a}'
+    + '#replay-bigplay:hover{background:#c59e56ee;color:#000}#replay-bigplay[hidden]{display:none}'
+    + 'body[data-replay-idle="1"] #replay-controls,body[data-replay-idle="1"] #replay-title{opacity:0}body[data-replay-idle="1"] #replay-stats{opacity:.7}body[data-replay-idle="1"]{cursor:none}'
+    + '#replay-result a{display:none}#map{cursor:pointer}';
+  document.head.appendChild(style);
+  const controls = document.getElementById('replay-controls');
+  // Order: seek bar on its own line, then the buttons.
+  const bar = document.createElement('div'); bar.id = 'replay-bar';
+  const seek = document.getElementById('replay-seek');
+  for (const node of [...controls.childNodes]) if (node !== seek && node.id !== 'replay-title' && node.id !== 'replay-error') bar.appendChild(node);
+  controls.append(seek, bar);
+  const full = document.createElement('button'); full.id = 'replay-full'; full.type = 'button'; full.textContent = 'Fullscreen'; full.setAttribute('aria-label', 'Fullscreen');
+  full.onclick = () => { if (document.fullscreenElement) document.exitFullscreen?.(); else document.documentElement.requestFullscreen?.().catch(() => {}); };
+  bar.appendChild(full);
+  const big = document.createElement('button'); big.id = 'replay-bigplay'; big.type = 'button'; big.hidden = true; big.textContent = '▶'; big.setAttribute('aria-label', 'Play');
+  big.onclick = () => replaySetPlaying(true);
+  document.body.appendChild(big);
+  // Click the scene to pause and resume, as in a video.
+  document.getElementById('map')?.addEventListener('click', () => { if (replayData) replaySetPlaying(!replayPlaying); });
+  // Chrome fades out while playing untouched; any pointer or key brings it back.
+  let idleTimer = 0;
+  const wake = () => {
+    document.body.dataset.replayIdle = '0';
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { if (replayPlaying) document.body.dataset.replayIdle = '1'; }, 2500);
+  };
+  for (const type of ['pointermove', 'pointerdown', 'touchstart', 'keydown', 'focusin']) document.addEventListener(type, wake, { passive: true });
+  wake();
+  document.addEventListener('keydown', e => {
+    if (!replayData || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.altKey || e.ctrlKey || e.metaKey) return;
+    const step = (ms) => replaySeek(replayTime + ms);
+    const actions = { ' ': () => replaySetPlaying(!replayPlaying), k: () => replaySetPlaying(!replayPlaying), ArrowLeft: () => step(-5000), ArrowRight: () => step(5000),
+      j: () => step(-10000), l: () => step(10000), '0': () => replaySeek(0), Home: () => replaySeek(0), m: () => document.getElementById('replay-sound').click(), f: () => full.click() };
+    const action = actions[e.key];
+    if (action) { e.preventDefault(); action(); }
+  });
+}
 async function replayStart() {
   document.title = 'UO Arena Replay';
   settings.sfx = true; audioMuted = false;
   const style = document.createElement('style');
-  style.textContent = 'body > :not(#map):not(#names):not(#replay-controls):not(#replay-stats):not(#replay-result):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
+  style.textContent = 'body > :not(#map):not(#names):not([id^="replay-"]):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
   style.textContent += '#replay-stats{position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:12px;pointer-events:none;color:#fff;font:13px system-ui;z-index:1000}.replay-fighter{width:240px;max-width:46%;background:#101720e8;border:1px solid #927341;border-radius:6px;padding:10px}.replay-fighter strong{display:block;margin-bottom:7px}.replay-resource{position:relative;background:#20242d;border:1px solid #606573;height:20px;margin-top:4px;overflow:hidden;border-radius:3px}.resource-fill{position:absolute;height:100%}.resource-text{position:absolute;inset:0;text-align:center;line-height:20px;text-shadow:0 1px 2px #000}.replay-fuse{position:absolute;transform:translate(-50%,-100%);font:bold 18px system-ui;color:#fff;background:#a12318;border:1px solid #ffd397;border-radius:50%;min-width:25px;text-align:center;text-shadow:0 1px #000;pointer-events:none}';
   style.textContent += '#replay-result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2000;width:min(440px,85vw);padding:28px;text-align:center;color:#fff;background:#111923f2;border:2px solid #c59e56;border-radius:12px;font:16px system-ui;box-shadow:0 16px 70px #000a}#replay-result[hidden]{display:none}#replay-result h2{color:#f5d28c}#replay-result button,#replay-result a{display:inline-block;margin:8px;padding:10px;color:#efd4a3}';
   document.head.appendChild(style);
   const result = document.createElement('section'); result.id='replay-result'; result.hidden=true; result.setAttribute('aria-live','polite');
   result.innerHTML='<h2></h2><p></p><button type="button">Watch again</button><a href="/#replays">Back to matches</a>';
-  result.querySelector('button').onclick=()=>{replaySeek(0); replayPlaying=true; document.getElementById('replay-play').textContent='Pause';};
+  result.querySelector('button').onclick=()=>{replaySeek(0); replaySetPlaying(true);};
   document.body.appendChild(result);
   const stats = document.createElement('div'); stats.id = 'replay-stats'; document.body.appendChild(stats);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
@@ -525,11 +594,8 @@ async function replayStart() {
     console.error(e);
   };
   document.getElementById('replay-retry').onclick = () => location.reload();
-  document.getElementById('replay-play').onclick = () => {
-    if (!replayData) return;
-    if (replayTime >= replayData.end.t) replaySeek(0);
-    replayPlaying = !replayPlaying; if (!replayPlaying) stopSoundEffects(); else unlockAudio(); document.getElementById('replay-play').textContent = replayPlaying ? 'Pause' : 'Play';
-  };
+  document.getElementById('replay-play').onclick = () => replaySetPlaying(!replayPlaying);
+  if (REPLAY_EMBED) replayEmbedSetup();
   document.getElementById('replay-speed').onchange = e => { replayRate = Number(e.target.value); };
   document.getElementById('replay-seek').oninput = e => replaySeek(Number(e.target.value));
   document.getElementById('replay-sound').onclick = () => {
@@ -544,7 +610,7 @@ async function replayStart() {
       const ready = replayBufferReady(replayData, replayTime, next);
       document.getElementById('replay-buffer').textContent = ready ? '' : ' · Buffering combat effects…';
       if (ready) replayTime = next;
-      if (replayTime >= replayData.end.t) { replayPlaying = false; stopSoundEffects(); document.getElementById('replay-play').textContent = 'Play'; }
+      if (replayTime >= replayData.end.t) replaySetPlaying(false);
     }
     if (real - lastPaint >= 30) { try { if (replayData && !replayPlaying) replayBufferReady(replayData, replayTime, replayTime); replayDraw(); } catch (err) { replayPlaying = false; error(err); } lastPaint = real; }
     requestAnimationFrame(tick);
@@ -559,7 +625,11 @@ async function replayStart() {
       document.body.dataset.replayReady = 'true';
       document.body.dataset.replayLoadMs = String(Math.round(performance.now() - loadingStarted));
       document.getElementById('replay-play').disabled = false;
-      if (params.get('thumbnail') !== '1') { void replaySetupLike(id); replaySetupReport(id); replaySeek(replayTimestamp(params.get('t'),replayData.end.t)); }
+      if (params.get('thumbnail') !== '1') {
+        if (!REPLAY_EMBED) { void replaySetupLike(id); replaySetupReport(id); }
+        replaySeek(replayTimestamp(params.get('t'),replayData.end.t));
+        if (REPLAY_EMBED) { document.getElementById('replay-bigplay').hidden = false; if (params.get('autoplay') === '1') replaySetPlaying(true); }
+      }
       if (params.get('thumbnail') === '1') {
         audioMuted=true;
         const action = replayData.visuals.find(e => e.kind === 1) || replayData.visuals.find(e => e.g);

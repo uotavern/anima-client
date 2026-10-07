@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Anima — Ultima Online</title>
+    <!-- A replay page must never flash the game client's HUD: hide everything but the scene
+         before the first paint; 15-replay.js adds its own controls (ids below) later. -->
+    <script>if (/[?&]replay=/.test(location.search)) document.documentElement.dataset.replay = '1';</script>
+    <style>html[data-replay] body > :not(#map):not(#names):not([id^="replay-"]):not(script):not(style) { display: none !important; }</style>
     <link rel="stylesheet" href="launcher.css">
     <link rel="stylesheet" href="preferences.css">
     <style>
@@ -1834,7 +1838,7 @@
     <script src="js/12-input.js"></script>
     <script src="js/13-macros.js"></script>
     <script src="preferences-ui.js"></script>
-    <script src="js/15-replay.js?v=replay-motion-16"></script>
+    <script src="js/15-replay.js?v=replay-embed-17"></script>
     <script src="js/14-wasm.js"></script>
   </body>
 </html>
