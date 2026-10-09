@@ -534,7 +534,12 @@ function replayEmbedSetup() {
     + '#replay-bigplay{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99998;width:84px;height:84px;border:0;border-radius:50%;background:#000a;color:#fff;font:36px/84px system-ui;text-align:center;padding-left:6px;cursor:pointer;box-shadow:0 4px 30px #000a}'
     + '#replay-bigplay:hover{background:#c59e56ee;color:#000}#replay-bigplay[hidden]{display:none}'
     + 'body[data-replay-idle="1"] #replay-controls,body[data-replay-idle="1"] #replay-title{opacity:0}body[data-replay-idle="1"] #replay-stats{opacity:.7}body[data-replay-idle="1"]{cursor:none}'
-    + '#replay-result a{display:none}#map{cursor:pointer}';
+    + '#replay-result a{display:none}#map{cursor:pointer}'
+    // One line in a narrow frame (the landing page's half-width players): icons instead of words.
+    + '@media(max-width:760px){#replay-bar{flex-wrap:nowrap;white-space:nowrap;gap:0}#replay-controls button,#replay-controls select{margin:3px 4px 3px 0;padding:4px 7px;font-size:13px}'
+    + '#replay-bar label{font-size:0}#replay-bar select{font-size:13px}#replay-time{font-size:12px;overflow:hidden;text-overflow:ellipsis}#replay-buffer{display:none}'
+    + '#replay-controls #replay-sound,#replay-controls #replay-full{font-size:0}#replay-sound::after{content:"🔊";font-size:15px}body[data-replay-muted="true"] #replay-sound::after{content:"🔇";font-size:15px}#replay-full::after{content:"⛶";font-size:16px}'
+    + '.replay-fighter{width:150px;padding:5px 6px;font-size:11px}.replay-resource{height:14px}.resource-text{line-height:14px;font-size:10px}}';
   document.head.appendChild(style);
   const controls = document.getElementById('replay-controls');
   // Order: seek bar on its own line, then the buttons.
@@ -601,6 +606,7 @@ async function replayStart() {
   document.getElementById('replay-sound').onclick = () => {
     audioMuted = !audioMuted; if (audioMuted) stopSoundEffects(); else unlockAudio();
     document.getElementById('replay-sound').textContent = audioMuted ? 'Sound off' : 'Sound on';
+    document.body.dataset.replayMuted = String(audioMuted);
   };
   let lastPaint = 0;
   function tick(real) {
