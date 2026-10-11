@@ -1,10 +1,11 @@
 // Read-only server replay, composed by the same PIXI UO renderer as live play.
 // No fake sprites, no simulation of combat outcomes, and no shard connection.
 let replayData = null, replayTime = 0, replayPlaying = false, replayRate = 1;
-// Embed mode: the viewer inside another page's frame (the arena's Duels page), drawn like a
-// video player: a big play button, a bottom bar that hides while playing, click-to-pause,
-// keyboard shortcuts, fullscreen; the match list, likes and reports stay with the full viewer.
-// `?embed=1` forces it; a frame gets it by default. `?autoplay=1` starts playback once loaded.
+// The viewer is drawn like a video player: a big play button, a bottom bar that hides while
+// playing, click-to-pause, keyboard shortcuts, fullscreen (replayVideoSetup). Embed mode, the
+// viewer inside another page's frame (the arena's Duels page), drops the match link, likes and
+// reports: they stay with the full viewer. `?embed=1` forces it; a frame gets it by default.
+// `?autoplay=1` starts playback once loaded.
 const REPLAY_EMBED = (() => {
   try {
     const q = new URLSearchParams(location.search);
@@ -520,12 +521,15 @@ function replaySetupReport(id) {
   const status=document.createElement('span');status.setAttribute('role','status');
   const dialog=document.createElement('dialog');dialog.id='replay-report-dialog';
   dialog.innerHTML='<form><h2>Report a replay moment</h2><p class="report-moment"></p><label>Category <select name="category"><option value="spell">Spell</option><option value="potion">Potion</option><option value="resources">HP / mana / stamina</option><option value="movement">Movement</option><option value="rules">Duel rules</option><option value="replay">Replay display</option><option value="other">Other</option></select></label><label>What happened? <textarea name="description" required minlength="10" maxlength="2000" rows="4" placeholder="What did you expect, and what happened? Do not include passwords or other private information."></textarea></label><p>Saved privately for the arena operator, with the match and timestamp. Up to 5 reports per day. Kept for up to 90 days.</p><button type="submit">Send report</button><button type="button" class="report-cancel">Cancel</button><p class="report-status" role="status"></p></form>';
-  controls.append(report,share,status,dialog);
+  share.textContent='Copy link';report.textContent='Report';
+  document.getElementById('replay-bar').insertBefore(status,document.getElementById('replay-sound'));
+  for(const node of [report,share]) status.before(node);
+  controls.append(dialog);
   const style=document.createElement('style');style.textContent='#replay-report-dialog{width:min(540px,85vw);max-height:80vh;overflow:auto;background:#17202b;color:#eee;border:1px solid #c59e56;border-radius:10px;padding:20px}#replay-report-dialog::backdrop{background:#0009}#replay-report-dialog label{display:block;margin:12px 0}#replay-report-dialog textarea{display:block;width:100%;box-sizing:border-box;margin-top:8px}#replay-report-dialog p{font-size:13px}';document.head.append(style);
   let atMs=0,pending=false;
   report.onclick=()=>{
     if(!replayData)return;
-    atMs=Math.round(replayTime);replayPlaying=false;stopSoundEffects();document.getElementById('replay-play').textContent='Play';
+    atMs=Math.round(replayTime);replaySetPlaying(false);
     dialog.querySelector('.report-moment').textContent=`Match ${id} · ${(atMs/1000).toFixed(1)} seconds`;
     dialog.querySelector('.report-status').textContent='';dialog.showModal();
   };
@@ -547,21 +551,23 @@ function replaySetupReport(id) {
   };
 }
 
-function replayEmbedSetup() {
+function replayVideoSetup() {
   const style = document.createElement('style');
   style.textContent = '#replay-controls{left:0;right:0;bottom:0;padding:6px 12px 10px;border:0;border-radius:0;background:linear-gradient(#0000,#000c 60%);transition:opacity .25s}'
-    + '#replay-controls button,#replay-controls select{margin:4px 6px 4px 0;padding:5px 9px;background:#ffffff22;color:#fff;border:0;border-radius:4px;font:14px system-ui;cursor:pointer}'
-    + '#replay-controls button:hover,#replay-controls select:hover{background:#ffffff3a}#replay-seek{display:block;width:100%;margin:0 0 6px;accent-color:#e5c38b;cursor:pointer}'
-    + '#replay-controls a,#replay-like,#replay-like-status{display:none!important}#replay-time{margin-right:auto;font:13px system-ui}#replay-buffer{font:13px system-ui}'
+    + '#replay-controls button,#replay-controls select,#replay-controls a{margin:4px 6px 4px 0;padding:5px 9px;background:#ffffff22;color:#fff;border:0;border-radius:4px;font:14px system-ui;cursor:pointer;text-decoration:none}'
+    + '#replay-controls button:hover,#replay-controls select:hover,#replay-controls a:hover{background:#ffffff3a}#replay-controls button:disabled{opacity:.5;cursor:default}#replay-like[aria-pressed="true"]{color:#ffb4a4}'
+    + '#replay-seek{display:block;width:100%;margin:0 0 6px;accent-color:#e5c38b;cursor:pointer}'
+    + 'body[data-replay-embed] #replay-controls a,body[data-replay-embed] #replay-like,body[data-replay-embed] #replay-like-status{display:none!important}'
+    + '#replay-time{margin-right:auto;font:13px system-ui}#replay-buffer,#replay-like-status,#replay-bar span[role="status"]{font:13px system-ui}'
     + '#replay-bar{display:flex;align-items:center;flex-wrap:wrap;gap:0 4px}'
-    + '#replay-title{position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 14px;background:linear-gradient(#000c,#0000);color:#fff;font:14px system-ui;text-shadow:0 1px 2px #000;transition:opacity .25s;pointer-events:none}'
+    + '#replay-title{position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px 14px;background:linear-gradient(#000c,#0000);color:#fff;font:14px system-ui;text-shadow:0 1px 2px #000;transition:opacity .25s;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
     + '#replay-stats{top:38px;transition:opacity .25s}.replay-fighter{width:190px;padding:7px 8px;font-size:12px;background:#101720c8}.replay-fighter strong{margin-bottom:4px}.replay-resource{height:16px;margin-top:3px}.resource-text{line-height:16px;font-size:11px}'
     + '#replay-bigplay{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:99998;width:84px;height:84px;border:0;border-radius:50%;background:#000a;color:#fff;font:36px/84px system-ui;text-align:center;padding-left:6px;cursor:pointer;box-shadow:0 4px 30px #000a}'
     + '#replay-bigplay:hover{background:#c59e56ee;color:#000}#replay-bigplay[hidden]{display:none}'
     + 'body[data-replay-idle="1"] #replay-controls,body[data-replay-idle="1"] #replay-title{opacity:0}body[data-replay-idle="1"] #replay-stats{opacity:.7}body[data-replay-idle="1"]{cursor:none}'
-    + '#replay-result a{display:none}#map{cursor:pointer}'
-    // One line in a narrow frame (the landing page's half-width players): icons instead of words.
-    + '@media(max-width:760px){#replay-bar{flex-wrap:nowrap;white-space:nowrap;gap:0}#replay-controls button,#replay-controls select{margin:3px 4px 3px 0;padding:4px 7px;font-size:13px}'
+    + 'body[data-replay-embed] #replay-result a{display:none}#map{cursor:pointer}'
+    // Narrow: icons instead of words; one line in a frame (the landing page's half-width players).
+    + '@media(max-width:760px){body[data-replay-embed] #replay-bar{flex-wrap:nowrap;white-space:nowrap}#replay-bar{gap:0}#replay-controls button,#replay-controls select,#replay-controls a{margin:3px 4px 3px 0;padding:4px 7px;font-size:13px}'
     + '#replay-bar label{font-size:0}#replay-bar select{font-size:13px}#replay-time{font-size:12px;overflow:hidden;text-overflow:ellipsis}#replay-buffer{display:none}'
     + '#replay-controls #replay-sound,#replay-controls #replay-full{font-size:0}#replay-sound::after{content:"🔊";font-size:15px}body[data-replay-muted="true"] #replay-sound::after{content:"🔇";font-size:15px}#replay-full::after{content:"⛶";font-size:16px}'
     + '.replay-fighter{width:150px;padding:5px 6px;font-size:11px}.replay-resource{height:14px}.resource-text{line-height:14px;font-size:10px}}';
@@ -629,7 +635,8 @@ async function replayStart() {
   };
   document.getElementById('replay-retry').onclick = () => location.reload();
   document.getElementById('replay-play').onclick = () => replaySetPlaying(!replayPlaying);
-  if (REPLAY_EMBED) replayEmbedSetup();
+  if (REPLAY_EMBED) document.body.dataset.replayEmbed = '1';
+  replayVideoSetup();
   document.getElementById('replay-speed').onchange = e => { replayRate = Number(e.target.value); };
   document.getElementById('replay-seek').oninput = e => replaySeek(Number(e.target.value));
   document.getElementById('replay-sound').onclick = () => {
@@ -664,7 +671,8 @@ async function replayStart() {
       if (params.get('thumbnail') !== '1') {
         if (!REPLAY_EMBED) { void replaySetupLike(id); replaySetupReport(id); }
         replaySeek(replayTimestamp(params.get('t'),replayData.end.t));
-        if (REPLAY_EMBED) { document.getElementById('replay-bigplay').hidden = false; if (params.get('autoplay') === '1') replaySetPlaying(true); }
+        document.getElementById('replay-bigplay').hidden = false;
+        if (params.get('autoplay') === '1') replaySetPlaying(true);
       }
       if (params.get('thumbnail') === '1') {
         audioMuted=true;
