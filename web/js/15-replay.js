@@ -28,6 +28,28 @@ let replayLastReal = 0, replayLastWorld = null, replayLastDraw = -1, replayLastS
 const replaySpeechShown = new Set(), replayStatusLabels = new Map(), replayPotionLabels = new Map();
 let replaySoundTime = 0;
 const replayEffectTextures = new Set();
+// Every combat texture of the match, fetched ahead in time order while the replay is open (even
+// paused), so playback does not stop to buffer; the texture cache keeps them (02-textures.js).
+const replayPrefetchTextures = new Set();
+let replayPrefetchUrls = [], replayPrefetchAt = 0;
+function replayPrefetchPlan(data) {
+  const seen = new Set(), ordered = [];
+  for (const ev of [...data.visuals].sort((a, b) => a.t - b.t)) {
+    for (const url of replayEffectUrls({ visuals: [ev] })) if (!seen.has(url)) { seen.add(url); ordered.push({ t: ev.t, url }); }
+  }
+  replayPrefetchUrls = ordered;
+  replayPrefetchTextures.clear(); for (const { url } of ordered) replayPrefetchTextures.add(url);
+}
+function replayPrefetchEffects(t) {
+  // The loader's queue forgets a request after two idle seconds, so keep asking for the next
+  // few dozen uncached textures, nearest to the play position first.
+  if (performance.now() - replayPrefetchAt < 250) return;
+  replayPrefetchAt = performance.now();
+  const ahead = replayPrefetchUrls.filter(e => e.t >= t && !texCache.has(e.url)).slice(0, 48);
+  const behind = ahead.length < 48 ? replayPrefetchUrls.filter(e => e.t < t && !texCache.has(e.url)).slice(0, 48 - ahead.length) : [];
+  // The next twenty seconds of effects load beside the scene's own queue, not behind it.
+  for (const { t: at, url } of [...ahead, ...behind]) (at >= t && at <= t + 20000 ? texForNow : texFor)(url);
+}
 const replayLooks = new Map(), replayArt = new Map(), replaySpawned = new Set();
 
 function replayAt(rows, t) {
@@ -223,6 +245,8 @@ function replayBufferReady(data, t, next) {
   const urls = replayEffectUrls({ visuals: upcoming });
   replayEffectTextures.clear();
   for (const url of urls) { replayEffectTextures.add(url); texFor(url); }
+  // The next three seconds jump the queue: a stall here is what the viewer shows as buffering.
+  for (const url of replayEffectUrls({ visuals: upcoming.filter(ev => ev.t <= next + 3000) })) texForNow(url);
   const due = replayEffectUrls({ visuals: upcoming.filter(ev => ev.t <= next) });
   return due.every(url => texCache.has(url));
 }
@@ -247,6 +271,7 @@ async function replayLoad(text) {
   document.getElementById('replay-title').textContent = 'Loading arena terrain…';
   data.terrain = await terrain;
   replayData = data; replayTime = 0; replaySoundTime = -1; replayLastWorld = null; replayLastDraw = -1;
+  replayPrefetchPlan(data); replayPrefetchAt = 0;
   replayResetEffects(); anim.clear(); dyingMobs.clear();
   document.getElementById('replay-seek').max = String(data.end.t);
   document.getElementById('replay-title').textContent = data.header.players.map(p => p.name).join(' vs ') + ' · ' + data.header.rules;
@@ -575,6 +600,10 @@ function replayEmbedSetup() {
 }
 async function replayStart() {
   document.title = 'UO Arena Replay';
+  // Pixi fetches images through a pool of (cores || 4) workers, one image at a time each: on a
+  // 0.3 s round trip that is ~15 textures a second, and a replay needs hundreds before its first
+  // combat effect. Main-thread loading runs TEX_LOADS fetches at once; the PNGs are tiny.
+  if (PIXI.Assets?.setPreferences) PIXI.Assets.setPreferences({ preferWorkers: false });
   settings.sfx = true; audioMuted = false;
   const style = document.createElement('style');
   style.textContent = 'body > :not(#map):not(#names):not([id^="replay-"]):not(script):not(style){display:none!important}#replay-controls{position:fixed;left:16px;right:16px;bottom:16px;z-index:99999;background:#151b24ed;color:#eee;padding:14px;border:1px solid #94764c;border-radius:8px;font:14px system-ui}#replay-controls button,#replay-controls select{margin:8px;padding:5px}#replay-seek{width:45%}#replay-error{color:#ffb4a4}';
@@ -618,6 +647,7 @@ async function replayStart() {
       if (ready) replayTime = next;
       if (replayTime >= replayData.end.t) replaySetPlaying(false);
     }
+    if (replayData) replayPrefetchEffects(replayTime);
     if (real - lastPaint >= 30) { try { if (replayData && !replayPlaying) replayBufferReady(replayData, replayTime, replayTime); replayDraw(); } catch (err) { replayPlaying = false; error(err); } lastPaint = real; }
     requestAnimationFrame(tick);
   }

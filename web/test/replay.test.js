@@ -233,12 +233,15 @@ test('missing optional replay pack falls back to ordinary metadata requests', as
 
 test('replay buffers approaching effects without downloading the whole match', () => {
   const ctx = newContext().load('00-state.js', '15-replay.js');
-  const cache = new Map(), requested=[];
-  ctx.set('texCache',cache);ctx.set('texFor',url=>requested.push(url));
+  const cache = new Map(), requested=[], urgent=[];
+  ctx.set('texCache',cache);ctx.set('texFor',url=>requested.push(url));ctx.set('texForNow',url=>urgent.push(url));
   ctx.set('effectTextureUrl',g=>'effect/'+g);
   ctx.set('record',{visuals:[{t:5000,g:42},{t:9000,g:43},{t:60000,g:44}]});
   ok(ctx.run('replayBufferReady(record,0,100)'));
   ok(requested.includes('effect/42'));ok(!requested.includes('effect/44'));
+  ok(!urgent.includes('effect/42'), 'five seconds away is not urgent yet');
+  ok(ctx.run('replayBufferReady(record,2500,2600)'));
+  ok(urgent.includes('effect/42') && !urgent.includes('effect/43'), 'the next three seconds jump the queue');
   ok(!ctx.run('replayBufferReady(record,4990,5010)'), 'do not skip a missing effect');
   cache.set('effect/42',{});
   ok(ctx.run('replayBufferReady(record,4990,5010)'));

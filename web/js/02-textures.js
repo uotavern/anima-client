@@ -32,6 +32,18 @@ function texFor(url) {
   pumpTextures();
   return null;
 }
+// A texture needed within moments (a replay's next combat effect): skip the FIFO queue, which
+// may hold hundreds of scene textures, and load it now. Bounded by the caller's small window.
+function texForNow(url) {
+  if (!url || texCache.has(url)) return texFor(url);
+  if (texUnloading.has(url) || loading.has(url)) return null;
+  const failure = texFailures.get(url);
+  if (failure && performance.now() < failure.until) return null;
+  texQueue.delete(url);
+  loading.add(url);
+  void loadTexture(url);
+  return null;
+}
 function textureFailed(url) {
   const delay = Math.min(60_000, (texFailures.get(url)?.delay || 1000) * 2);
   texFailures.delete(url);
@@ -82,7 +94,7 @@ function sweepTexCache() {
   if (now - lastTexSweep < TEX_SWEEP_MS) return;
   lastTexSweep = now;
   const live = new Set();
-  if (REPLAY_MODE) for (const url of replayEffectTextures) live.add(url);
+  if (REPLAY_MODE) { for (const url of replayEffectTextures) live.add(url); for (const url of replayPrefetchTextures) live.add(url); }
   forEachLiveTexUrl((u) => { if (u) live.add(u); });
   // URL pools cannot describe every on-stage owner: corpse clothing, stationary
   // house previews and an effect's last-good frame are examples. Inspect the
