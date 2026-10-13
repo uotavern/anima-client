@@ -604,6 +604,8 @@ function replayVideoSetup() {
     if (action) { e.preventDefault(); action(); }
   });
 }
+// The match list lives on the arena's Duels page at its canonical address (the hub mounts the
+// arena host under /arena/); the viewer itself is served from arena.uotavern.com/replay/.
 async function replayStart() {
   document.title = 'UO Arena Replay';
   // Pixi fetches images through a pool of (cores || 4) workers, one image at a time each: on a
@@ -617,12 +619,12 @@ async function replayStart() {
   style.textContent += '#replay-result{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2000;width:min(440px,85vw);padding:28px;text-align:center;color:#fff;background:#111923f2;border:2px solid #c59e56;border-radius:12px;font:16px system-ui;box-shadow:0 16px 70px #000a}#replay-result[hidden]{display:none}#replay-result h2{color:#f5d28c}#replay-result button,#replay-result a{display:inline-block;margin:8px;padding:10px;color:#efd4a3}';
   document.head.appendChild(style);
   const result = document.createElement('section'); result.id='replay-result'; result.hidden=true; result.setAttribute('aria-live','polite');
-  result.innerHTML='<h2></h2><p></p><button type="button">Watch again</button><a href="/#replays">Back to matches</a>';
+  result.innerHTML='<h2></h2><p></p><button type="button">Watch again</button><a href="https://www.uotavern.com/arena/duels/#replays">Back to matches</a>';
   result.querySelector('button').onclick=()=>{replaySeek(0); replaySetPlaying(true);};
   document.body.appendChild(result);
   const stats = document.createElement('div'); stats.id = 'replay-stats'; document.body.appendChild(stats);
   const ui = document.createElement('section'); ui.id = 'replay-controls';
-  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="/#replays" style="color:#e5c38b">← Matches</a><button id="replay-play" disabled>Play</button><button id="replay-retry" hidden>Retry loading</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><span id="replay-buffer" role="status"></span><button id="replay-sound">Sound on</button><button id="replay-like" aria-label="Like this replay" aria-pressed="false" disabled>♡ Like</button><span id="replay-like-status" role="status"></span><div id="replay-error" role="alert"></div>';
+  ui.innerHTML = '<div id="replay-title">UO Arena Replay</div><a href="https://www.uotavern.com/arena/duels/#replays" style="color:#e5c38b">← Duels</a><button id="replay-play" disabled>Play</button><button id="replay-retry" hidden>Retry loading</button><label>Speed <select id="replay-speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select></label><input id="replay-seek" aria-label="Replay position" type="range" min="0" max="1" value="0" step="1"><span id="replay-time"></span><span id="replay-buffer" role="status"></span><button id="replay-sound">Sound on</button><button id="replay-like" aria-label="Like this replay" aria-pressed="false" disabled>♡ Like</button><span id="replay-like-status" role="status"></span><div id="replay-error" role="alert"></div>';
   document.body.appendChild(ui);
   const error = e => {
     document.getElementById('replay-error').textContent = e.message;
