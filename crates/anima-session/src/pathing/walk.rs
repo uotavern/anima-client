@@ -596,6 +596,27 @@ impl Terrain for MapTerrain<'_> {
     }
 }
 
+/// One immutable-world survey reuses its dynamic-item index across all tiles.
+/// Rebuild for every observation; never retain this across network updates.
+pub struct SurveyTerrain<'a> {
+    pub scan: TileScan<'a>,
+    pub map: &'a mut MapData,
+}
+
+impl Terrain for SurveyTerrain<'_> {
+    fn walkable_step(&mut self, x: u32, y: u32, from_z: i32) -> Option<i32> {
+        explain_tile_walkable_for_planning_scanned(
+            &self.scan, self.map, None, x as i64, y as i64, from_z,
+        )
+        .0
+    }
+
+    fn door_at(&mut self, x: u32, y: u32, current_z: i32) -> Option<u32> {
+        // Keep the existing door predicate, including serial identity.
+        door_blocking_at(self.scan.world(), self.map, x as i64, y as i64, current_z)
+    }
+}
+
 /// A closed door blocking the next hop gets this many `Use` (open) attempts,
 /// one per cadence tick, before we give up and treat its tile like any other
 /// wall (blacklist + re-path around it). Bounds the case a real UO player

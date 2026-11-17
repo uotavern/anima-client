@@ -820,13 +820,8 @@ impl Session {
             return obs; // not in the world yet — nothing to centre on
         };
         let (center, from_z) = ((p.pos.x, p.pos.y), p.pos.z);
-        let empty = HashSet::new();
-        let mut terrain = MapTerrain {
-            world: &self.world,
-            map,
-            blocked: &empty,
-            multis: None,
-        };
+        let scan = pathing::TileScan::build(&self.world, map);
+        let mut terrain = pathing::SurveyTerrain { scan, map };
         obs.terrain = Some(survey_terrain(&mut terrain, center, from_z, radius));
         obs
     }
