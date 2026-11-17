@@ -11,6 +11,15 @@
 
 use super::lengths::{packet_length, PacketLength};
 
+/// Counts and packet metadata only; no payload or credential bytes are exposed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DecoderDiagnostics {
+    pub compressed_bytes: usize,
+    pub decoded_bytes: usize,
+    pub pending_opcode: Option<u8>,
+    pub pending_frame_length: Option<usize>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum FramingError {
     /// Packet id is not in the length table — we can't know its boundary, so the
@@ -57,6 +66,23 @@ impl FrameDecoder {
     /// Append freshly-received bytes.
     pub fn feed(&mut self, data: &[u8]) {
         self.buf.extend_from_slice(data);
+    }
+
+    fn diagnostics(&self) -> DecoderDiagnostics {
+        let pending_opcode = self.buf.first().copied();
+        let pending_frame_length = pending_opcode.and_then(|id| match packet_length(id) {
+            PacketLength::Fixed(length) => Some(length),
+            PacketLength::Variable if self.buf.len() >= 3 => {
+                Some(u16::from_be_bytes([self.buf[1], self.buf[2]]) as usize)
+            }
+            _ => None,
+        });
+        DecoderDiagnostics {
+            decoded_bytes: self.buf.len(),
+            pending_opcode,
+            pending_frame_length,
+            ..DecoderDiagnostics::default()
+        }
     }
 
     /// Pop one complete frame (id byte included), or `None` if more bytes are
@@ -168,6 +194,16 @@ impl StreamDecoder {
             StreamDecoder::Game(d) => d.pop(),
         }
     }
+
+    pub fn diagnostics(&self) -> DecoderDiagnostics {
+        match self {
+            StreamDecoder::Login(decoder) => decoder.diagnostics(),
+            StreamDecoder::Game(decoder) => DecoderDiagnostics {
+                compressed_bytes: decoder.compressed.len(),
+                ..decoder.frames.diagnostics()
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +266,21 @@ mod tests {
                 declared: 2
             })
         );
+    }
+
+    #[test]
+    fn diagnostics_distinguish_partial_header_body_and_empty_stream() {
+        let mut decoder = StreamDecoder::new();
+        assert_eq!(decoder.diagnostics(), DecoderDiagnostics::default());
+        decoder.feed(&[0xA8, 0x01]);
+        assert_eq!(decoder.diagnostics().pending_opcode, Some(0xA8));
+        assert_eq!(decoder.diagnostics().pending_frame_length, None);
+        decoder.feed(&[0x00, 0xAA]);
+        assert_eq!(decoder.diagnostics().pending_frame_length, Some(256));
+        assert_eq!(decoder.diagnostics().decoded_bytes, 4);
+        decoder.switch_to_game();
+        decoder.feed(&[0xFF]);
+        assert_eq!(decoder.diagnostics().compressed_bytes, 1);
     }
 
     #[test]
