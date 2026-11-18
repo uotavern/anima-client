@@ -172,3 +172,21 @@ test("invalid character geometry is preserved and rejects backup replacement", a
   ctx.set("invalidBackup", JSON.stringify({ format: "anima-preferences", version: 1, values: record.values }));
   throws(() => ctx.run("preferenceStorage.parseBackup(invalidBackup)"), /invalid values/);
 });
+
+
+test("server dialog kinds isolate sizes while preserving legacy shared geometry", () => {
+  const legacy = {left:50,top:60,w:275,h:200};
+  const ctx = context({[GEOMETRY]: {".dialog-win": legacy}});
+  ctx.run('__small = buildGumpWindow({serial:1,gumpId:10,w:200,h:100,elements:[]})');
+  ok(!ctx.run('__small.el.querySelector(".gump-body").style.width'), "ambiguous legacy size is not inherited");
+  ctx.run('saveWinGeom(winKey(__small.el), {left:30,top:40,w:210,h:110})');
+  ctx.run('__large = buildGumpWindow({serial:2,gumpId:20,w:600,h:480,elements:[]})');
+  ok(!ctx.run('__large.el.querySelector(".gump-body").style.width'), "different kind keeps natural content size");
+  eq(ctx.run('__large.canvas.style.width'), '600px');
+  ctx.run('__reopen = buildGumpWindow({serial:99,gumpId:10,w:200,h:100,elements:[]})');
+  eq(ctx.run('__reopen.el.querySelector(".gump-body").style.width'), '210px');
+  eq(ctx.run('__reopen.el.querySelector(".gump-body").style.height'), '110px');
+  eq(ctx.run('__reopen.el.style.left'), '30px');
+  deepEq(saved(ctx)['.dialog-win'], legacy, "old config remains available in backup");
+  deepEq(saved(ctx)['.dialog-win-10'], {left:30,top:40,w:210,h:110});
+});

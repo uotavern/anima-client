@@ -1524,6 +1524,7 @@ function buildGumpWindow(g, { previous } = {}) {
   const saved = gumpPos.get(gumpId);
   const { el, bar: title, body } = makeWindowFrame({
     cls: "dialog-win", title: "Dialog", cascade: gumpCascade, pos: saved, resizable: true,
+    geometryKey: `.dialog-win-${gumpId}`,
     onClose: () => { sendInput(`gump:${serial}:${gumpId}:0`); closeGump(serial); },
     draggable: false, // wired below so the drag can also update gumpPos
   });
