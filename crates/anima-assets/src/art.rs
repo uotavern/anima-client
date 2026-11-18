@@ -4,6 +4,7 @@
 //! Land art index = land graphic (0..0x3FFF); static art index = 0x4000 + graphic.
 
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::path::Path;
 
 use crate::def::parse_alias_def;
@@ -81,6 +82,47 @@ fn argb1555(c: u16) -> [u8; 4] {
 
 fn rd_u16(d: &[u8], p: usize) -> u16 {
     u16::from_le_bytes([d[p], d[p + 1]])
+}
+
+/// First static art index: land graphics fill `0..0x4000`, statics follow.
+pub const STATIC_ART_BASE: usize = 0x4000;
+
+/// Every art index a graphic can name: the land range plus a full `u16` of
+/// statics. Later expansions (Stygian Abyss, High Seas, Time of Legends) put
+/// statics well past 0x3FFF, e.g. the Lost Lands Coliseum's 0x4301..0x4DDF,
+/// so stopping at `0x8000` silently drops them.
+pub const ART_INDEX_COUNT: usize = STATIC_ART_BASE + 0x1_0000;
+
+/// Write art entries `0..count` as a legacy `artidx.mul` + `art.mul` pair.
+/// `read(index)` supplies an entry's raw bytes, or `None` for an empty slot.
+/// Returns the number of entries written with data.
+pub fn write_legacy_art(
+    count: usize,
+    mut read: impl FnMut(usize) -> Option<Vec<u8>>,
+    idx: &mut impl Write,
+    mul: &mut impl Write,
+) -> io::Result<usize> {
+    let mut offset = 0u32;
+    let mut present = 0usize;
+    for i in 0..count {
+        match read(i) {
+            Some(bytes) => {
+                let len = u32::try_from(bytes.len()).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "art entry too large")
+                })?;
+                idx.write_all(&offset.to_le_bytes())?;
+                idx.write_all(&len.to_le_bytes())?;
+                idx.write_all(&0u32.to_le_bytes())?;
+                mul.write_all(&bytes)?;
+                offset = offset.checked_add(len).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "art.mul exceeds 4 GiB")
+                })?;
+                present += 1;
+            }
+            None => idx.write_all(&[255; 12])?,
+        }
+    }
+    Ok(present)
 }
 
 enum ArtSource {
@@ -216,7 +258,7 @@ impl Art {
 
     /// Decode a static tile (graphic, art index 0x4000+graphic) to RGBA.
     pub fn static_tile(&self, graphic: u16) -> Option<Image> {
-        let (data, _) = self.resolve(0x4000 + graphic as usize)?;
+        let (data, _) = self.resolve(STATIC_ART_BASE + graphic as usize)?;
         if data.len() < 8 {
             return None;
         }
@@ -325,6 +367,54 @@ mod tests {
         );
         // And the colour really is black, not some accidental fill.
         assert_eq!(&rgba[(22 * 44 + 22) * 4..][..4], &[0, 0, 0, 255]);
+    }
+
+    /// One-pixel static: header, one lookup offset, a run of one colour, end.
+    fn one_pixel_static(colour: u16) -> Vec<u8> {
+        let mut d = vec![0u8; 4];
+        for v in [1u16, 1, 0, 0, 1, colour, 0, 0] {
+            d.extend_from_slice(&v.to_le_bytes());
+        }
+        d
+    }
+
+    #[test]
+    fn legacy_art_pack_keeps_statics_past_0x3fff() {
+        // The replay asset server returned 404 for every static >= 16384 because
+        // the arena pack stopped at art index 0x8000. Statics up to 0xFFFF must
+        // survive a pack and decode from the resulting MUL pair.
+        let wanted = [0u16, 16383, 16384, 17153, 19935, 0xFFFF];
+        let mut idx = Vec::new();
+        let mut mul = Vec::new();
+        let present = write_legacy_art(
+            ART_INDEX_COUNT,
+            |i| {
+                let g = i.checked_sub(STATIC_ART_BASE)?;
+                wanted
+                    .contains(&(g as u16))
+                    .then(|| one_pixel_static(0x7C00))
+            },
+            &mut idx,
+            &mut mul,
+        )
+        .unwrap();
+        assert_eq!(present, wanted.len());
+        assert_eq!(idx.len(), ART_INDEX_COUNT * 12);
+
+        let dir = std::env::temp_dir().join(format!("anima_art_pack_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("artidx.mul"), &idx).unwrap();
+        std::fs::write(dir.join("art.mul"), &mul).unwrap();
+        let art = Art::open(&dir).unwrap();
+        for g in wanted {
+            let img = art
+                .static_tile(g)
+                .unwrap_or_else(|| panic!("static {g} missing"));
+            assert_eq!((img.width, img.height), (1, 1));
+            assert_eq!(img.rgba[3], 255, "static {g} pixel should be opaque");
+        }
+        assert!(art.static_tile(16385).is_none());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
