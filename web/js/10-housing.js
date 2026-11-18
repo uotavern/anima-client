@@ -1417,6 +1417,7 @@ function buildGumpWindow(g, { previous } = {}) {
   const maxPage = (g.elements || []).reduce((m, e) => Math.max(m, e.page | 0), 0);
   const page = previous ? Math.min(previous.page, maxPage || 1) : 1;
   const win = { el, serial, gumpId, canvas, page, nodes: [] };
+  const labelledElements = [];
   for (const e of (g.elements || [])) {
     const node = buildGumpElement(win, e);
     // A tooltip/itemproperty is not a box: UO attaches it to whatever element
@@ -1429,13 +1430,35 @@ function buildGumpWindow(g, { previous } = {}) {
     }
     node.dataset.page = e.page | 0;
     win.nodes.push(node);
+    labelledElements.push({ element: e, node });
     canvas.appendChild(node);
   }
+  labelGumpButtons(win, labelledElements);
   applyGumpPage(win);
   // Remember where the user drags this window, keyed by kind, so the next reopen
   // (fresh serial) lands there too.
   makeDraggable(el, title, (x, y) => gumpPos.set(gumpId, { left: x, top: y }));
   return win;
+}
+// The wire layout has no label references. Recognize only the conventional
+// single adjacent label on the same page/row, and retain a neutral fallback
+// for ambiguous layouts. Reference the sanitized visible DOM, never raw HTML.
+function labelGumpButtons(win, elements) {
+  const buttons = elements.filter(({ element: e }) => e.t === "button" || e.t === "btnart");
+  const labels = elements.filter(({ element: e, node }) => e.t === "text" && node.textContent.trim());
+  const adjacent = (button, label) => {
+    const b = button.element, t = label.element;
+    return (b.page | 0) === (t.page | 0) && Math.abs((b.y | 0) - (t.y | 0)) <= 4
+      && (t.x | 0) - (b.x | 0) >= 24 && (t.x | 0) - (b.x | 0) <= 48;
+  };
+  for (const button of buttons) {
+    const candidates = labels.filter((label) => adjacent(button, label));
+    if (candidates.length !== 1) continue;
+    const label = candidates[0];
+    if (buttons.filter((other) => adjacent(other, label)).length !== 1) continue;
+    label.node.id = `gump-label-${win.serial}-${win.gumpId}-${elements.indexOf(label)}`;
+    button.node.setAttribute("aria-labelledby", label.node.id);
+  }
 }
 // Show/hide this window's elements for its current local page: page-0
 // elements are always visible; everything else only shows while it's the
@@ -1604,7 +1627,7 @@ function renderGumpHtml(raw, boxWidth) {
 }
 function buildGumpElement(win, e) {
   const { serial, gumpId } = win;
-  const node = document.createElement(e.t === "button" ? "button" : "div");
+  const node = document.createElement(e.t === "button" || e.t === "btnart" ? "button" : "div");
   node.className = "dlg-el";
   node.style.left = (e.x | 0) + "px";
   node.style.top = (e.y | 0) + "px";
@@ -1647,10 +1670,10 @@ function buildGumpElement(win, e) {
     // network); pageflag 1 (or absent, for callers that never set it) = a real
     // reply button that sends 0xB1 GumpResponse with this element's reply id.
     if ((e.pageflag | 0) === 0) {
-      node.title = "page " + (e.param | 0);
+      node.setAttribute("aria-label", "Go to page " + (e.param | 0));
       node.addEventListener("click", () => { win.page = e.param | 0; applyGumpPage(win); });
     } else {
-      node.title = "reply " + (e.id | 0);
+      node.setAttribute("aria-label", "Reply " + (e.id | 0));
       node.addEventListener("click", () => submitGump(serial, gumpId, e.id | 0));
     }
   } else if (e.t === "check" || e.t === "radio") {
@@ -1707,6 +1730,8 @@ function buildGumpElement(win, e) {
     node.appendChild(img);
   } else if (e.t === "btnart") {
     // buttontileart: an ordinary button whose face is item art.
+    node.type = "button";
+    node.setAttribute("aria-label", (e.pf | 0) === 0 ? "Go to page " + (e.param | 0) : "Reply " + (e.id | 0));
     node.classList.add("dlg-btn", "img");
     const img = document.createElement("img");
     img.src = `art/static/${e.art | 0}.png` + ((e.hue | 0) ? `?hue=${e.hue | 0}` : "");
