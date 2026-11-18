@@ -1216,8 +1216,9 @@
       .hdesign-actions { display: flex; flex-wrap: wrap; gap: 6px; }
       .hdesign-actions .dlg-btn { flex: 1; min-width: 64px; text-align: center; }
       /* House tools remain reachable without covering the entire small viewport. */
-      .hdesign-win { width: min(350px, calc(100vw - 16px)); max-height: calc(100vh - 56px); max-height: calc(100dvh - 56px); display: flex; flex-direction: column; }
+      .hdesign-win { width: min(350px, calc(100vw - 16px)); max-height: calc(100vh - 56px); max-height: min(640px, calc(100dvh - 56px)); display: flex; flex-direction: column; }
       .hdesign-win .gump-body { min-height: 0; overflow-y: auto; }
+      .hdesign-tabs .hdesign-tab { flex: 1 1 76px; min-width: 76px; white-space: normal; overflow-wrap: anywhere; }
       .hdesign-win label, .hdesign-floor-label { font-size: 12px; }
       .hdesign-help, .hdesign-coordinates p { font-size: 12px; line-height: 1.4; color: #c3cbd8; }
       .hdesign-win button { min-height: 32px; font: inherit; }

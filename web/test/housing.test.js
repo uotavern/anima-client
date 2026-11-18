@@ -59,7 +59,7 @@ test('commit and clear cancellation never send commands',()=>{
 });
 test('catalog failure shows retry and recovers without closing editor',async()=>{
  const c=setup();c.run('hdesignCatalog=null;hdesignCatalogPromise=null');c.setFetch(()=>({ok:false,status:503}));await c.run('loadHouseCatalog()');eq(win(c).retry.hidden,false);includes(win(c).status.textContent,'could not load');
- c.setFetch(()=>catalog);win(c).retry.click();await c.flush();eq(win(c).retry.hidden,true);eq(win(c).grid.querySelectorAll('button').length,2);
+ c.setFetch(()=>catalog);win(c).retry.click();await c.flush();eq(win(c).retry.hidden,true);eq(win(c).grid.querySelectorAll('button').length,2);includes(win(c).status.textContent,'Catalog ready');
 });
 
 

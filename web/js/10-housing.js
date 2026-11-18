@@ -116,7 +116,13 @@ function loadHouseCatalog() {
         hdesignCatalog = data; return data;
       })
       .catch(() => { hdesignCatalogError = true; hdesignCatalogPromise = null; return null; })
-      .finally(() => { clearTimeout(timer); if (hdesignWin) renderHouseDesignPicker(); });
+      .finally(() => {
+        clearTimeout(timer);
+        if (hdesignWin) {
+          renderHouseDesignPicker();
+          if (!hdesignCatalogError) hdesignStatus("Catalog ready. Choose a piece, then click the foundation or enter tile coordinates.");
+        }
+      });
   }
   return hdesignCatalogPromise;
 }
