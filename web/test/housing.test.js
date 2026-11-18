@@ -74,3 +74,20 @@ test('old session response cannot mark a new editor as changed',async()=>{
  const c=setup();let resolve;c.setFetch(()=>new Promise(r=>{resolve=r;}));const pending=c.run('hdesignSend("add:100:0:0","Place",true)');
  c.run('closeHouseDesignWindow();hdesignSerial=123;buildHouseDesignWindow(scene.houseDesign)');resolve({});await pending;eq(c.run('hdesignPending'),null);eq(win(c).status.textContent,'');
 });
+
+
+test('rebuilding tool palettes keeps one delegated handler and releases obsolete controls',()=>{
+ const c=setup(),grid=win(c).grid,original=grid.querySelector('button');
+ c.run('for(let i=0;i<25;i++){renderHouseDesignGrid(hdesignStyles("wall")[0]);renderHouseDesignFloors();}');
+ eq(grid.listeners.get('keydown').length,1);eq(grid.listeners.get('focusin').length,1);
+ eq(win(c).floorRow.listeners.get('keydown').length,1);ok(!grid.contains(original));
+ const current=grid.querySelectorAll('button');c.fire(current[0],'keydown',{key:'ArrowRight',bubbles:true});eq(c.document.activeElement,current[1]);
+ c.run('closeHouseDesignWindow()');eq(c.run('hdesignWin'),null);ok(!c.document.body.contains(grid));
+});
+test('blank keyboard tile coordinates do not silently target the foundation center',()=>{
+ const c=setup();win(c).grid.querySelector('button').click();win(c).el.querySelector('.hdesign-x').value='';
+ win(c).el.querySelector('.hdesign-apply').click();eq(c.sent.length,0);includes(win(c).status.textContent,'Enter both X and Y');
+});
+test('server floor refresh restores focused floor control',()=>{
+ const c=setup();win(c).floorRow.querySelector('[data-floor="2"]').focus();c.run('scene.houseDesign.floor=2;scene.houseDesign.floorZ=27;syncDialogs(scene)');eq(c.document.activeElement.dataset.floor,'2');ok(win(c).floorRow.contains(c.document.activeElement));
+});

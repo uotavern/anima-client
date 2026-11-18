@@ -45,10 +45,17 @@ function hdesignStatus(text) {
 function hdesignToolbar(bar) {
   bar.setAttribute("role", "toolbar"); bar.setAttribute("focusgroup", "toolbar wrap");
   if (typeof HTMLElement !== "undefined" && "focusGroup" in HTMLElement.prototype) return;
-  const buttons = [...bar.querySelectorAll("button")];
-  buttons.forEach((b, i) => { b.tabIndex = i ? -1 : 0; });
-  bar.addEventListener("focusin", (e) => { if (buttons.includes(e.target)) buttons.forEach((b) => { b.tabIndex = b === e.target ? 0 : -1; }); });
+  [...bar.querySelectorAll("button")].forEach((b, i) => { b.tabIndex = i ? -1 : 0; });
+  // The container outlives its pieces. Install once and query CURRENT controls;
+  // retaining a captured button array on each rebuild leaks every old palette.
+  if (bar.dataset.hdesignKeys === "ready") return;
+  bar.dataset.hdesignKeys = "ready";
+  bar.addEventListener("focusin", (e) => {
+    const buttons = [...bar.querySelectorAll("button")];
+    if (buttons.includes(e.target)) buttons.forEach((b) => { b.tabIndex = b === e.target ? 0 : -1; });
+  });
   bar.addEventListener("keydown", (e) => {
+    const buttons = [...bar.querySelectorAll("button")];
     const index = buttons.indexOf(e.target); if (index < 0) return;
     const rtl = getComputedStyle(bar).direction === "rtl";
     const step = e.key === "ArrowRight" ? (rtl ? -1 : 1) : e.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
@@ -208,12 +215,13 @@ function renderHouseDesignPicker() {
 function renderHouseDesignFloors() {
   if (!hdesignWin) return;
   const row = hdesignWin.floorRow;
+  const focusedFloor = row.contains(document.activeElement) ? document.activeElement.dataset.floor : null;
   row.innerHTML = "";
   for (let n = 1; n <= hdesignWin.floors; n++) {
     const b = document.createElement("button");
     b.type = "button"; b.className = "dlg-btn hdesign-floor-btn";
     b.setAttribute("aria-pressed", String(n === hdesignFloor));
-    b.setAttribute("aria-label", "Floor " + n);
+    b.setAttribute("aria-label", "Floor " + n); b.dataset.floor = String(n);
     b.textContent = String(n);
     b.addEventListener("click", () => {
       hdesignSend("floor:" + n, "Floor " + n + " requested");
@@ -221,6 +229,7 @@ function renderHouseDesignFloors() {
     row.appendChild(b);
   }
   hdesignToolbar(row);
+  if (focusedFloor) (row.querySelector(`[data-floor="${focusedFloor}"]`) || row.querySelector("button"))?.focus();
 }
 function closeHouseDesignWindow() {
   if (hdesignWin) { hdesignWin.el.remove(); hdesignWin = null; }
@@ -302,8 +311,9 @@ function buildHouseDesignWindow(hd) {
   hdesignWin.retry.addEventListener("click", () => { loadHouseCatalog(); renderHouseDesignPicker(); });
   el.querySelector(".hdesign-roof").addEventListener("change", (e) => { hdesignRoofZ = Number(e.target.value); clearHouseDesignGhost(); });
   el.querySelector(".hdesign-apply").addEventListener("click", () => {
-    const x = Number(el.querySelector(".hdesign-x").value), y = Number(el.querySelector(".hdesign-y").value);
-    applyHouseDesignTile(x, y);
+    const xInput = el.querySelector(".hdesign-x"), yInput = el.querySelector(".hdesign-y");
+    if (!xInput.value.trim() || !yInput.value.trim()) { hdesignStatus("Enter both X and Y tile offsets before applying a tool."); return; }
+    applyHouseDesignTile(Number(xInput.value), Number(yInput.value));
   });
   el.querySelector(".hdesign-floor-value").textContent = String(hdesignFloor);
   renderHouseDesignFloors();
