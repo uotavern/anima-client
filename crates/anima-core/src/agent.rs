@@ -13,10 +13,10 @@ use crate::gump_layout::GumpElement;
 use crate::path::Terrain;
 use crate::types::Position;
 use crate::world::{
-    is_ghost_body, Book, Buff, CharacterProfile, DragCompletion, Effect, HuePicker, JournalEntry,
-    LegacyMenu, LogoutAck, MapView, MultiPlacement, OpenUrlRequest, Party, PopupMenu, PromptState,
-    RaceChangePrompt, ShopBuy, ShopSell, SpellbookContent, TargetCursor, TextEntryDialog,
-    TipNotice, TrackedMember, TradeState, Weather, World,
+    is_ghost_body, Book, Buff, CharacterProfile, DragCompletion, Effect, HouseDesign, HuePicker,
+    JournalEntry, LegacyMenu, LogoutAck, MapView, MultiPlacement, OpenUrlRequest, Party, PopupMenu,
+    PromptState, RaceChangePrompt, ShopBuy, ShopSell, SpellbookContent, TargetCursor,
+    TextEntryDialog, TipNotice, TrackedMember, TradeState, Weather, World,
 };
 
 /// A skill value, in human units (50.0 == GM-half). Derived from [`crate::world::Skill`].
@@ -460,6 +460,11 @@ pub struct Observation {
     /// The house or boat the server asks us to place (0x99), alongside the
     /// target cursor it raised; answer with [`Action::TargetGround`].
     pub pending_multi_placement: Option<MultiPlacement>,
+    /// Authoritative customization session, set/cleared by 0xBF/0x20.
+    pub customizing_house: Option<u32>,
+    /// Last server designs, sorted by serial. Raw planes remain available to
+    /// headless clients even without foundation asset bounds for tile decoding.
+    pub house_designs: Vec<(u32, HouseDesign)>,
 }
 
 /// A square window of walkability centred on the player, in world tiles.
@@ -1493,6 +1498,16 @@ impl World {
             recent_lift_rejects: self.recent_lift_rejects.clone(),
             recent_drag_completions: self.recent_drag_completions.clone(),
             pending_multi_placement: self.pending_multi_placement,
+            customizing_house: self.customizing_house,
+            house_designs: {
+                let mut designs: Vec<_> = self
+                    .house_designs
+                    .iter()
+                    .map(|(&s, d)| (s, d.clone()))
+                    .collect();
+                designs.sort_by_key(|(serial, _)| *serial);
+                designs
+            },
         }
     }
 }

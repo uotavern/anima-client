@@ -280,6 +280,7 @@ function onStaticPointerDown(sp, e) {
   // `GetStaticTiles` check). ClassicUO carries `SendMultiTarget`, which forces
   // graphic 0, for exactly this. So fall through to the canvas handler, which
   // already sends graphic 0 — see `setupInput`'s mousedown.
+  if (scene && scene.houseDesign && handleHouseDesignStatic(st)) return;
   if (scene && (scene.placement || scene.houseDesign)) return;
   entityClickedAt = performance.now();
   if (inspectPick) { inspectPicked({ x: st.x | 0, y: st.y | 0 }); return; }
@@ -554,14 +555,14 @@ function updateHouseDesignGhost() {
     if (hdesignGhost) clearHouseDesignGhost();
     return;
   }
-  const key = hdesignPiece.graphic + "@" + hdesignHoverX + "," + hdesignHoverY;
+  const key = [hdesignPiece.graphic, hdesignHoverX, hdesignHoverY, hd.floorZ, hdesignRoofZ].join(":");
   if (key === hdesignGhostKey && !hdesignGhostPending) return; // nothing changed
-  const tex = texFor(`art/static/${hdesignPiece.graphic}.png`);
+  const tex = texFor(`art/static/${hdesignPiece.art || hdesignPiece.graphic}.png`);
   if (!tex) { hdesignGhostPending = true; return; } // texFor() will markDirty() once it loads; caught on a later poll
   hdesignGhostKey = key;
   hdesignGhostPending = false;
   if (hdesignGhost) { world.removeChild(hdesignGhost); hdesignGhost.destroy(); hdesignGhost = null; }
-  const z = tileSZ(hdesignHoverX, hdesignHoverY) ?? (scene.player ? scene.player.z | 0 : 0);
+  const z = hd.z + (hd.floorZ ?? 7) + (hdesignPiece.mode === "roof" ? hdesignRoofZ : 0);
   const sp = new PIXI.Sprite(tex);
   sp.anchor.set(0.5, 1.0); // foot-anchored, exactly like the static pool / multi preview above
   sp.x = isoX(hdesignHoverX, hdesignHoverY);

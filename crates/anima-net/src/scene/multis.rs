@@ -189,10 +189,44 @@ pub(super) fn house_design_json(world: &World, multis: Option<&Multis>) -> Optio
         .map(|d| d.revision)
         .unwrap_or(0);
     let floors = house_design_max_levels(multis, item.graphic as u32);
+    let bounds = multis
+        .and_then(|m| m.components(item.graphic as u32))
+        .filter(|c| !c.is_empty())
+        .map(|components| {
+            let (mut min_x, mut min_y, mut max_x, mut max_y) = (0i16, 0i16, 0i16, 0i16);
+            for c in components {
+                min_x = min_x.min(c.dx);
+                min_y = min_y.min(c.dy);
+                max_x = max_x.max(c.dx);
+                max_y = max_y.max(c.dy);
+            }
+            json!({"minX":min_x,"minY":min_y,"maxX":max_x,"maxY":max_y})
+        });
+    let design = world.house_designs.get(&serial);
+    let tiles_ready = design.is_some_and(|d| d.tiles_ready);
+    let mut tiles: Vec<_> = design
+        .filter(|d| d.tiles_ready)
+        .into_iter()
+        .flat_map(|d| d.tiles.iter())
+        .flat_map(|(&(x, y), pieces)| pieces.iter().map(move |&(graphic, z)| (x, y, z, graphic)))
+        .collect();
+    tiles.sort_unstable();
+    let floor = world
+        .player_mobile()
+        .map(|p| {
+            ((i32::from(p.pos.z) - i32::from(item.pos.z) - 7).div_euclid(20) + 1)
+                .clamp(1, i32::from(floors))
+        })
+        .unwrap_or(1);
     Some(json!({
         "serial": serial,
         "revision": revision,
         "floors": floors,
+        "bounds": bounds,
+        "tilesReady": tiles_ready,
+        "tiles": tiles.iter().map(|&(x,y,z,graphic)| json!({"graphic":graphic,"x":x,"y":y,"z":z})).collect::<Vec<_>>(),
+        "floor": floor,
+        "floorZ": 7 + (floor - 1) * 20,
         "x": item.pos.x,
         "y": item.pos.y,
         "z": item.pos.z,
