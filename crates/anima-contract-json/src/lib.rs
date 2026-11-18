@@ -838,6 +838,13 @@ pub fn observation_to_json(obs: &Observation) -> Value {
         "recent_drag_completions": obs.recent_drag_completions.iter().map(|d| {
             json!({ "seq": d.seq, "packet": d.packet, "token": d.token })
         }).collect::<Vec<_>>(),
+        "customizing_house": obs.customizing_house,
+        "house_designs": obs.house_designs.iter().map(|(serial, design)| json!({
+            "serial": serial, "revision": design.revision,
+            "planes": design.planes.iter().map(|p| json!({
+                "mode": p.mode, "plane_z": p.plane_z, "data": p.data,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "pending_multi_placement": obs.pending_multi_placement.map(|m| {
             json!({ "multi_id": m.multi_id, "x_off": m.x_off, "y_off": m.y_off,
                     "z_off": m.z_off, "hue": m.hue })
@@ -2714,5 +2721,47 @@ mod tests {
         assert_eq!(v["type"], "html");
         assert_eq!(v["text"]["cliloc"]["id"], 1042971);
         assert_eq!(v["text"]["cliloc"]["args"], "a\tb");
+    }
+}
+
+#[cfg(test)]
+mod housing_observation_tests {
+    use super::*;
+    use anima_core::world::{HouseDesign, HousePlane, World};
+
+    #[test]
+    fn authoritative_house_design_is_visible_headless_and_pruned_on_delete() {
+        let mut world = World::new();
+        world.customizing_house = Some(42);
+        world.house_designs.insert(
+            42,
+            HouseDesign {
+                revision: 7,
+                planes: vec![HousePlane {
+                    mode: 0,
+                    plane_z: 0,
+                    data: vec![0x05, 0x18, 255, 2, 27],
+                }],
+                ..Default::default()
+            },
+        );
+        let value = observation_to_json(&world.observe(&mut 0));
+        assert_eq!(value["customizing_house"], 42);
+        assert_eq!(value["house_designs"][0]["revision"], 7);
+        assert_eq!(
+            value["house_designs"][0]["planes"][0]["data"],
+            json!([5, 24, 255, 2, 27])
+        );
+        world.remove(42);
+        let value = observation_to_json(&world.observe(&mut 0));
+        assert_eq!(value["house_designs"], json!([]));
+        // An item leaving view does not end a server-owned design session.
+        anima_core::net::game::apply_packet(
+            &mut world,
+            &[
+                0xbf, 0, 17, 0, 0x20, 0, 0, 0, 42, 5, 0, 0, 255, 255, 255, 255, 255,
+            ],
+        );
+        assert!(observation_to_json(&world.observe(&mut 0))["customizing_house"].is_null());
     }
 }

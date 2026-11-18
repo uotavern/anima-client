@@ -735,7 +735,10 @@ pub(super) fn house_catalog_json(data_dir: &Path) -> String {
         "floors": flat_json(&catalog.floors, |x| (x.comment.as_str(), x.graphics.as_slice())),
         "doors": flat_json(&catalog.doors, |x| (x.comment.as_str(), x.graphics.as_slice())),
         "misc": categories_json(&catalog.misc, |m| (m.comment.as_str(), m.graphics.as_slice())),
-        "stairs": flat_json(&catalog.stairs, |x| (x.comment.as_str(), x.graphics.as_slice())),
+        "stairs": catalog.stairs.iter().map(|stair| serde_json::json!({
+            "comment":stair.comment, "graphics":stair.graphics,
+            "multis":[stair.multi_north,stair.multi_east,stair.multi_south,stair.multi_west],
+        })).collect::<Vec<_>>(),
         "teleporters": flat_json(&catalog.teleporters, |x| (x.comment.as_str(), x.graphics.as_slice())),
         "roofs": categories_json(&catalog.roofs, |r| (r.comment.as_str(), r.graphics.as_slice())),
     });
@@ -1170,4 +1173,24 @@ pub(super) fn parse_tileart_stack_url(url: &str) -> Option<(u16, u32)> {
     let rest = url.strip_prefix("/tileart/stack/")?;
     let (g, amount) = rest.split_once('/')?;
     Some((g.parse().ok()?, amount.parse().ok()?))
+}
+
+#[cfg(test)]
+mod housing_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn stair_catalog_keeps_multi_ids_distinct_from_preview_art() {
+        let dir = std::env::temp_dir().join(format!("anima-stair-catalog-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("stairs.txt"), "0\t1848\t1849\t1852\t1851\t1850\t1856\t1854\t1862\t1861\t7600\t7601\t7602\t7603\t0\tDark Wood\n").unwrap();
+        let value: serde_json::Value = serde_json::from_str(&house_catalog_json(&dir)).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        assert_eq!(
+            value["stairs"][0]["multis"],
+            serde_json::json!([7600, 7601, 7602, 7603])
+        );
+        assert_eq!(value["stairs"][0]["graphics"][0], 1856);
+        assert_eq!(value["stairs"][0]["graphics"][4], 1848);
+    }
 }

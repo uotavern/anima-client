@@ -3898,3 +3898,74 @@ fn an_exploding_effect_carries_the_burst_the_browser_has_to_draw() {
     assert!(arr[1].get("explodes").is_none());
     assert!(arr[1].get("exFrames").is_none());
 }
+
+#[test]
+fn house_editor_uses_server_tiles_bounds_and_floor_instead_of_palette_or_ground() {
+    let mut world = World::new();
+    world.customizing_house = Some(42);
+    world.item_mut(42).graphic = 100;
+    world.item_mut(42).pos = Position {
+        x: 100,
+        y: 200,
+        z: 5,
+    };
+    world.player = Some(Serial(1));
+    world.mobile_mut(1).pos = Position {
+        x: 100,
+        y: 200,
+        z: 32,
+    };
+    let multis = Multis::from_components(std::collections::HashMap::from([(
+        100,
+        vec![
+            MultiComponent {
+                graphic: 1,
+                dx: -3,
+                dy: -4,
+                dz: 0,
+                visible: false,
+                server_keeps: true,
+                is_origin: true,
+            },
+            MultiComponent {
+                graphic: 1,
+                dx: 3,
+                dy: 4,
+                dz: 0,
+                visible: true,
+                server_keeps: true,
+                is_origin: false,
+            },
+        ],
+    )]));
+    let mut design = anima_core::world::HouseDesign {
+        revision: 9,
+        tiles_ready: true,
+        ..Default::default()
+    };
+    design.tiles.insert((1, -2), vec![(0x518, 27), (0x5d1, 30)]);
+    world.house_designs.insert(42, design);
+    let value = house_design_json(&world, Some(&multis)).unwrap();
+    assert_eq!(
+        value["bounds"],
+        json!({"minX":-3,"minY":-4,"maxX":3,"maxY":4})
+    );
+    assert_eq!(value["floor"], 2);
+    assert_eq!(value["floorZ"], 27);
+    assert_eq!(value["tilesReady"], true);
+    assert_eq!(
+        value["tiles"],
+        json!([
+            {"graphic":0x518,"x":1,"y":-2,"z":27},
+            {"graphic":0x5d1,"x":1,"y":-2,"z":30}
+        ])
+    );
+    world.house_designs.get_mut(&42).unwrap().tiles_ready = false;
+    let value = house_design_json(&world, Some(&multis)).unwrap();
+    assert_eq!(value["tilesReady"], false);
+    assert_eq!(
+        value["tiles"],
+        json!([]),
+        "stale decoded tiles must not be offered as erase targets"
+    );
+}
