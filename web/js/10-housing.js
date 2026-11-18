@@ -8,10 +8,10 @@
 // never draws the house. Built dynamically — one window total, like .trade-win/
 // .map-win — created when a session starts and torn down when it ends, not rebuilt
 // every poll (see refreshHouseDesign's early-out below). ----
-const HDESIGN_MODES = ["wall", "door", "floor", "stair", "roof", "misc"];
-const HDESIGN_LABELS = { wall: "Wall", door: "Door", floor: "Floor", stair: "Stair", roof: "Roof", misc: "Misc" };
+const HDESIGN_MODES = ["wall", "door", "floor", "stair", "roof", "misc", "teleporter"];
+const HDESIGN_LABELS = { wall: "Wall", door: "Door", floor: "Floor", stair: "Stair", roof: "Roof", misc: "Misc", teleporter: "Teleporter" };
 // Catalog JSON key per mode (GET /housecatalog — see loadHouseCatalog).
-const HDESIGN_CATALOG_KEY = { wall: "walls", door: "doors", floor: "floors", stair: "stairs", roof: "roofs", misc: "misc" };
+const HDESIGN_CATALOG_KEY = { wall: "walls", door: "doors", floor: "floors", stair: "stairs", roof: "roofs", misc: "misc", teleporter: "teleporters" };
 // wall/roof/misc are CATEGORISED (an array of {category, items:[{comment,graphics}]}
 // style groups); floor/door/stair are already a flat [{comment,graphics}] list — see
 // hdesignStyles() below, which reduces both shapes to one for the picker.
@@ -32,26 +32,84 @@ let hdesignWin = null;     // the single panel, once built ({ el, styleSel, grid
 let hdesignSerial = null;  // houseDesign.serial the panel is currently built for
 let hdesignCatalog = null; // GET /housecatalog response — static, fetched once (see loadHouseCatalog)
 let hdesignCatalogPromise = null;
+let hdesignCatalogError = false;
+let hdesignPending = null, hdesignPendingTimer = null, hdesignBusy = false;
+let hdesignRoofZ = 0, hdesignConsumedAt = -Infinity, hdesignGeneration = 0;
+
+function hdesignOption(text, value) {
+  const option = document.createElement("option"); option.textContent = text; option.value = value; return option;
+}
+function hdesignStatus(text) {
+  if (hdesignWin && hdesignWin.status.textContent !== text) hdesignWin.status.textContent = text;
+}
+function hdesignToolbar(bar) {
+  bar.setAttribute("role", "toolbar"); bar.setAttribute("focusgroup", "toolbar wrap");
+  if (typeof HTMLElement !== "undefined" && "focusGroup" in HTMLElement.prototype) return;
+  const buttons = [...bar.querySelectorAll("button")];
+  buttons.forEach((b, i) => { b.tabIndex = i ? -1 : 0; });
+  bar.addEventListener("focusin", (e) => { if (buttons.includes(e.target)) buttons.forEach((b) => { b.tabIndex = b === e.target ? 0 : -1; }); });
+  bar.addEventListener("keydown", (e) => {
+    const index = buttons.indexOf(e.target); if (index < 0) return;
+    const rtl = getComputedStyle(bar).direction === "rtl";
+    const step = e.key === "ArrowRight" ? (rtl ? -1 : 1) : e.key === "ArrowLeft" ? (rtl ? 1 : -1) : 0;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : step ? (index + step + buttons.length) % buttons.length : -1;
+    if (next >= 0) { e.preventDefault(); buttons[next].focus(); }
+  });
+}
+async function hdesignSend(cmd, message, waitRevision = false) {
+  const hd = scene && scene.houseDesign;
+  if (!hd || hd.serial !== hdesignSerial || REPLAY_MODE || sceneReloading || !sceneTransportAvailable) {
+    hdesignStatus("Not connected to this design session. Reconnect before editing."); return false;
+  }
+  if (hdesignBusy || hdesignPending) { hdesignStatus("Waiting for the server. Do not repeat the edit; use Resync if needed."); return false; }
+  hdesignBusy = true;
+  const sessionId = scene.sessionId || "", serial = hd.serial, generation = hdesignGeneration;
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+  hdesignStatus(message + " — sending…");
+  try {
+    const response = await fetch("/input", { method: "POST", headers: { "X-Anima-Session": sessionId }, body: "hdesign:" + cmd, signal: controller.signal });
+    if (!response.ok) throw new Error("input rejected");
+    if (!hdesignWin || generation !== hdesignGeneration || hdesignSerial !== serial || (scene.sessionId || "") !== sessionId) return false;
+    hdesignStatus(message + (waitRevision ? " — waiting for the server design." : " — request sent. Check the server response."));
+    const requestedFloor = /^floor:[1-4]$/.test(cmd) ? Number(cmd.split(":")[1]) : null;
+    if (requestedFloor && scene.houseDesign?.floor === requestedFloor) { hdesignStatus("Editing floor " + requestedFloor + " confirmed by the server."); }
+    else if (waitRevision && scene.houseDesign?.revision !== hd.revision) { hdesignStatus("Server design updated. Commit when ready to save the house."); }
+    else if (waitRevision || requestedFloor) {
+      hdesignPending = { serial, revision: hd.revision, floor: requestedFloor };
+      hdesignPendingTimer = setTimeout(() => {
+        hdesignPending = null;
+        hdesignStatus("No design change confirmed yet. Check the tile and building rules, then Resync. No edit was retried.");
+      }, 5000);
+    }
+    return true;
+  } catch {
+    if (generation === hdesignGeneration && hdesignSerial === serial) hdesignStatus("Could not send the request. Check the connection, then Resync before trying again.");
+    return false;
+  } finally { clearTimeout(timer); if (generation === hdesignGeneration) hdesignBusy = false; }
+}
+
 let hdesignMode = "wall";  // active tab
-const hdesignStyleIdx = { wall: 0, door: 0, floor: 0, stair: 0, roof: 0, misc: 0 }; // remembered <select> pick per mode
+const hdesignStyleIdx = { wall: 0, door: 0, floor: 0, stair: 0, roof: 0, misc: 0, teleporter: 0 }; // remembered <select> pick per mode
 let hdesignPiece = null;   // { mode, graphic } currently selected to place, or null (nothing to place yet)
 let hdesignEraser = false; // eraser toggle: a ground click deletes instead of placing
-let hdesignFloor = 1;      // active floor (1..houseDesign.floors), client-tracked — the server has no
-                            // "current floor" readback, it just acts on whichever hdesign:floor:<n> came last
+let hdesignFloor = 1;      // active floor confirmed by the server player position
 
 // Static per-server catalog (same shape for every foundation) — fetch once and cache
 // forever, same pattern as loadDyedPalette() above; re-entering design mode later
 // (even for a different house) reuses it rather than refetching.
 function loadHouseCatalog() {
+  if (hdesignCatalog) return Promise.resolve(hdesignCatalog);
   if (!hdesignCatalogPromise) {
-    hdesignCatalogPromise = fetch("/housecatalog")
-      .then((r) => { if (!r.ok) throw new Error("housecatalog HTTP " + r.status); return r.json(); })
-      .then((data) => { hdesignCatalog = data; if (hdesignWin) renderHouseDesignPicker(); return data; })
-      .catch((error) => {
-        console.warn("house catalog unavailable", error);
-        hdesignCatalogPromise = null; // allow a later attempt (e.g. reopening the editor) to retry
-        return null;
-      });
+    hdesignCatalogError = false;
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 10000);
+    hdesignCatalogPromise = fetch("/housecatalog", { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error("catalog unavailable"); return r.json(); })
+      .then((data) => {
+        if (!data || !Object.values(HDESIGN_CATALOG_KEY).every((key) => Array.isArray(data[key]))) throw new Error("invalid catalog");
+        hdesignCatalog = data; return data;
+      })
+      .catch(() => { hdesignCatalogError = true; hdesignCatalogPromise = null; return null; })
+      .finally(() => { clearTimeout(timer); if (hdesignWin) renderHouseDesignPicker(); });
   }
   return hdesignCatalogPromise;
 }
@@ -63,10 +121,11 @@ function loadHouseCatalog() {
 function hdesignStyles(mode) {
   const key = HDESIGN_CATALOG_KEY[mode];
   const list = (hdesignCatalog && hdesignCatalog[key]) || [];
-  if (!HDESIGN_GROUPED.has(mode)) return list.map((it) => ({ comment: it.comment, graphics: it.graphics || [], group: null }));
+  if (!HDESIGN_GROUPED.has(mode)) return list.filter((it) => it && Array.isArray(it.graphics)).map((it) => ({ ...it, comment: it.comment, graphics: it.graphics, group: null }));
   const out = [];
   for (const cat of list) {
-    for (const it of (cat.items || [])) {
+    for (const it of (cat && Array.isArray(cat.items) ? cat.items : [])) {
+      if (!it || !Array.isArray(it.graphics)) continue;
       out.push({ comment: it.comment, graphics: it.graphics || [], group: "Category " + (cat.category | 0) });
     }
   }
@@ -81,26 +140,36 @@ function hdesignStyles(mode) {
 function renderHouseDesignGrid(style) {
   if (!hdesignWin) return;
   const grid = hdesignWin.grid;
-  grid.innerHTML = "";
+  grid.replaceChildren();
   if (!style) return;
-  for (const raw of style.graphics || []) {
-    const gph = raw | 0;
-    if (!gph || gph >= HDESIGN_MAX_GRAPHIC) continue;
-    const cell = document.createElement("div");
+  const pieces = [];
+  (style.graphics || []).forEach((art, index) => {
+    if (!Number.isInteger(art) || art <= 0 || art >= HDESIGN_MAX_GRAPHIC) return;
+    if (hdesignMode === "stair" && index < 4) {
+      const multi = style.multis && style.multis[index];
+      if (Number.isInteger(multi) && multi > 0 && multi <= 65535)
+        pieces.push({ graphic: multi, command: "stair", art, label: "Staircase " + ["North", "East", "South", "West"][index] });
+    } else pieces.push({ graphic: art, command: "add", art, label: "Tile " + art.toString(16).toUpperCase() });
+  });
+  for (const piece of pieces) {
+    const cell = document.createElement("button"); cell.type = "button";
     cell.className = "hdesign-piece";
-    if (hdesignPiece && hdesignPiece.mode === hdesignMode && hdesignPiece.graphic === gph) cell.classList.add("selected");
-    const img = document.createElement("img");
-    img.className = "hdesign-piece-icon";
-    img.src = `art/static/${gph}.png`;
-    img.onerror = () => { img.style.visibility = "hidden"; };
-    cell.appendChild(img);
+    cell.setAttribute("aria-label", `${style.comment || HDESIGN_LABELS[hdesignMode]}: ${piece.label}`);
+    cell.setAttribute("aria-pressed", String(!!hdesignPiece && hdesignPiece.mode === hdesignMode && hdesignPiece.graphic === piece.graphic));
+    const img = document.createElement("img"); img.alt = ""; img.className = "hdesign-piece-icon";
+    img.src = `art/static/${piece.art}.png`; img.onerror = () => { img.hidden = true; };
+    const caption = document.createElement("span"); caption.textContent = piece.label;
+    cell.append(img, caption);
     cell.addEventListener("click", () => {
-      hdesignPiece = { mode: hdesignMode, graphic: gph };
-      grid.querySelectorAll(".hdesign-piece.selected").forEach((c) => c.classList.remove("selected"));
-      cell.classList.add("selected");
+      hdesignPiece = { mode: hdesignMode, ...piece }; hdesignEraser = false; hdesignWin.eraserCb.checked = false;
+      grid.querySelectorAll("button").forEach((c) => c.setAttribute("aria-pressed", String(c === cell)));
+      hdesignStatus(`${HDESIGN_LABELS[hdesignMode]} selected: ${piece.label}. Click the foundation, or enter a tile below.`);
+      clearHouseDesignGhost();
     });
     grid.appendChild(cell);
   }
+  if (!pieces.length) { const note = document.createElement("p"); note.textContent = "No supported pieces in this style. Choose another style."; grid.appendChild(note); }
+  hdesignToolbar(grid);
 }
 // Rebuild the style <select> for the active mode (labelled by each style's own
 // `comment`, grouped into <optgroup>s for wall/roof/misc) and its piece grid below
@@ -108,13 +177,20 @@ function renderHouseDesignGrid(style) {
 function renderHouseDesignPicker() {
   if (!hdesignWin) return;
   const sel = hdesignWin.styleSel;
-  if (!hdesignCatalog) { sel.replaceChildren(new Option("loading…", "")); renderHouseDesignGrid(null); return; }
+  hdesignWin.retry.hidden = !hdesignCatalogError;
+  if (!hdesignCatalog) {
+    sel.replaceChildren(hdesignOption(hdesignCatalogError ? "Catalog unavailable" : "Loading catalog…", ""));
+    sel.disabled = true; renderHouseDesignGrid(null);
+    hdesignStatus(hdesignCatalogError ? "Building catalog could not load. Retry catalog to choose pieces. Existing pieces can still be erased." : "Loading the building catalog…");
+    return;
+  }
+  sel.disabled = false;
   const styles = hdesignStyles(hdesignMode);
   const grouped = HDESIGN_GROUPED.has(hdesignMode);
   const kids = [];
   let group = null;
   styles.forEach((st, i) => {
-    const opt = new Option(st.comment || ("Style " + i), String(i));
+    const opt = hdesignOption(st.comment || ("Style " + i), String(i));
     if (grouped) {
       if (!group || group.label !== st.group) { group = document.createElement("optgroup"); group.label = st.group; kids.push(group); }
       group.appendChild(opt);
@@ -122,7 +198,7 @@ function renderHouseDesignPicker() {
       kids.push(opt);
     }
   });
-  sel.replaceChildren(...(kids.length ? kids : [new Option("(none)", "")]));
+  sel.replaceChildren(...(kids.length ? kids : [hdesignOption("(none)", "")]));
   const idx = Math.min(hdesignStyleIdx[hdesignMode] || 0, Math.max(0, styles.length - 1));
   sel.value = String(idx);
   renderHouseDesignGrid(styles[idx] || null);
@@ -135,45 +211,58 @@ function renderHouseDesignFloors() {
   row.innerHTML = "";
   for (let n = 1; n <= hdesignWin.floors; n++) {
     const b = document.createElement("button");
-    b.className = "dlg-btn hdesign-floor-btn" + (n === hdesignFloor ? " active" : "");
+    b.type = "button"; b.className = "dlg-btn hdesign-floor-btn";
+    b.setAttribute("aria-pressed", String(n === hdesignFloor));
+    b.setAttribute("aria-label", "Floor " + n);
     b.textContent = String(n);
     b.addEventListener("click", () => {
-      hdesignFloor = n;
-      row.querySelectorAll(".hdesign-floor-btn").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      sendInput("hdesign:floor:" + n);
+      hdesignSend("floor:" + n, "Floor " + n + " requested");
     });
     row.appendChild(b);
   }
+  hdesignToolbar(row);
 }
 function closeHouseDesignWindow() {
   if (hdesignWin) { hdesignWin.el.remove(); hdesignWin = null; }
-  hdesignSerial = null;
+  hdesignSerial = null; hdesignGeneration++; clearTimeout(hdesignPendingTimer); hdesignPending = null; hdesignBusy = false;
   clearHouseDesignGhost(); // don't leave a stale ghost sprite behind once the session/panel is gone
 }
 function buildHouseDesignWindow(hd) {
+  hdesignGeneration++;
   const { el, body } = makeWindowFrame({
-    cls: "hdesign-win", title: "House Design", pos: { left: 260, top: 70 },
-    onClose: () => sendInput("hdesign:close"),
+    cls: "hdesign-win", title: "House Design", pos: { left: Math.max(8, Math.min(260, innerWidth - 360)), top: 40 },
+    onClose: () => hdesignSend("close", "Exit requested; uncommitted changes are not a saved house"),
+  });
+  el.setAttribute("role", "region"); el.setAttribute("aria-label", "House design editor");
+  const closer = el.querySelector(".gump-close"); closer.textContent = "";
+  const closeButton = document.createElement("button"); closeButton.type = "button"; closeButton.textContent = "×";
+  closeButton.setAttribute("aria-label", "Exit house design"); closer.appendChild(closeButton);
+  el.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // editor navigation must never walk, cast or open chat
+    if (e.key === "Escape") { hdesignPiece = null; hdesignEraser = false; hdesignWin.eraserCb.checked = false; clearHouseDesignGhost(); renderHouseDesignPicker(); hdesignStatus("Tool cleared. Your working design is unchanged."); }
   });
   body.innerHTML =
-    '<div class="hdesign-tabs">' + HDESIGN_MODES.map((m) =>
-        `<button class="hdesign-tab${m === hdesignMode ? " active" : ""}" data-mode="${m}">${HDESIGN_LABELS[m]}</button>`).join("")
+    '<p class="hdesign-help">Choose a piece, then click your foundation. Commit opens the server confirmation; a request alone does not save the house.</p><div class="hdesign-tabs" aria-label="Piece category">' + HDESIGN_MODES.map((m) =>
+        `<button type="button" class="hdesign-tab" aria-pressed="${m === hdesignMode}" data-mode="${m}">${HDESIGN_LABELS[m]}</button>`).join("")
     + '</div>'
-    + '<select class="hdesign-style"></select>'
-    + '<div class="hdesign-grid"></div>'
+    + '<label for="hdesign-style">Building style</label><select id="hdesign-style" class="hdesign-style"></select><button type="button" class="dlg-btn hdesign-retry" hidden>Retry catalog</button>'
+    + '<div class="hdesign-grid" aria-label="Building pieces"></div>'
     + '<label class="hdesign-eraser"><input type="checkbox" class="hdesign-eraser-cb"> Eraser (click deletes)</label>'
-    + '<div class="hdesign-floor-row"></div>'
-    + '<div class="hdesign-actions">'
-    + '<button class="dlg-btn" data-cmd="commit">Commit</button>'
-    + '<button class="dlg-btn" data-cmd="revert">Revert</button>'
-    + '<button class="dlg-btn" data-cmd="backup">Backup</button>'
-    + '<button class="dlg-btn" data-cmd="restore">Restore</button>'
-    + '<button class="dlg-btn" data-cmd="clear">Clear</button>'
-    + '<button class="dlg-btn" data-cmd="close">Exit</button>'
+    + '<p class="hdesign-floor-label">Editing floor <span class="hdesign-floor-value">1</span></p><div class="hdesign-floor-row" aria-label="Editing floor"></div>'
+    + '<label for="hdesign-roof">Roof height above this floor</label><select id="hdesign-roof" class="hdesign-roof"><option value="-3">−3</option><option value="0" selected>0</option><option value="3">+3</option><option value="6">+6</option><option value="9">+9</option><option value="12">+12</option></select>'
+    + '<details class="hdesign-coordinates"><summary>Place or erase by tile</summary><p>Offsets from the foundation center. Useful with a keyboard or overlapping pieces.</p><div class="hdesign-xy"><label>X <input class="hdesign-x" type="number" step="1" value="0"></label><label>Y <input class="hdesign-y" type="number" step="1" value="0"></label></div><button type="button" class="dlg-btn hdesign-apply">Apply to tile</button></details>'
+    + '<p class="hdesign-status" role="status" aria-atomic="true"></p>'
+    + '<div class="hdesign-actions" role="group" aria-label="Design actions">'
+    + '<button type="button" class="dlg-btn" data-cmd="commit">Commit</button>'
+    + '<button type="button" class="dlg-btn" data-cmd="revert">Revert</button>'
+    + '<button type="button" class="dlg-btn" data-cmd="backup">Backup</button>'
+    + '<button type="button" class="dlg-btn" data-cmd="restore">Restore</button>'
+    + '<button type="button" class="dlg-btn" data-cmd="clear">Clear</button>'
+    + '<button type="button" class="dlg-btn" data-cmd="close">Exit</button><button type="button" class="dlg-btn" data-cmd="sync">Resync</button>'
     + '</div>';
   hdesignWin = {
     el,
+    status: el.querySelector(".hdesign-status"), retry: el.querySelector(".hdesign-retry"),
     styleSel: el.querySelector(".hdesign-style"),
     grid: el.querySelector(".hdesign-grid"),
     eraserCb: el.querySelector(".hdesign-eraser-cb"),
@@ -186,16 +275,17 @@ function buildHouseDesignWindow(hd) {
   // decides for itself that the session is over.)
   el.querySelectorAll(".hdesign-tab").forEach((btn) => {
     btn.addEventListener("click", () => {
-      hdesignMode = btn.dataset.mode;
-      el.querySelectorAll(".hdesign-tab").forEach((b) => b.classList.toggle("active", b === btn));
+      hdesignMode = btn.dataset.mode; hdesignPiece = null; clearHouseDesignGhost();
+      el.querySelectorAll(".hdesign-tab").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
       renderHouseDesignPicker();
     });
   });
   hdesignWin.styleSel.addEventListener("change", () => {
+    hdesignPiece = null; clearHouseDesignGhost();
     hdesignStyleIdx[hdesignMode] = parseInt(hdesignWin.styleSel.value, 10) || 0;
     renderHouseDesignGrid(hdesignStyles(hdesignMode)[hdesignStyleIdx[hdesignMode]] || null);
   });
-  hdesignWin.eraserCb.addEventListener("change", () => { hdesignEraser = hdesignWin.eraserCb.checked; });
+  hdesignWin.eraserCb.addEventListener("change", () => { hdesignEraser = hdesignWin.eraserCb.checked; clearHouseDesignGhost(); hdesignStatus(hdesignEraser ? "Eraser active. Click an existing piece; no catalog selection is needed." : "Choose a piece to place."); });
   el.querySelectorAll(".hdesign-actions [data-cmd]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const cmd = btn.dataset.cmd;
@@ -203,9 +293,19 @@ function buildHouseDesignWindow(hd) {
       // empty foundation) — confirm first, matching the character-delete confirm.
       if (cmd === "commit" && !window.confirm("Commit this house design? This finalizes the layout.")) return;
       if (cmd === "clear" && !window.confirm("Clear the entire design back to an empty foundation? This cannot be undone.")) return;
-      sendInput("hdesign:" + cmd);
+      if ((cmd === "revert" || cmd === "restore") && !window.confirm("Replace the current working design with the " + (cmd === "revert" ? "last committed house" : "backup") + "?")) return;
+      if (cmd === "sync") { clearTimeout(hdesignPendingTimer); hdesignPending = null; }
+      hdesignSend(cmd, cmd === "commit" ? "Commit requested. Review the server confirmation and cost" : btn.textContent + " requested", ["clear", "revert", "restore"].includes(cmd));
     });
   });
+  hdesignToolbar(el.querySelector(".hdesign-tabs"));
+  hdesignWin.retry.addEventListener("click", () => { loadHouseCatalog(); renderHouseDesignPicker(); });
+  el.querySelector(".hdesign-roof").addEventListener("change", (e) => { hdesignRoofZ = Number(e.target.value); clearHouseDesignGhost(); });
+  el.querySelector(".hdesign-apply").addEventListener("click", () => {
+    const x = Number(el.querySelector(".hdesign-x").value), y = Number(el.querySelector(".hdesign-y").value);
+    applyHouseDesignTile(x, y);
+  });
+  el.querySelector(".hdesign-floor-value").textContent = String(hdesignFloor);
   renderHouseDesignFloors();
   renderHouseDesignPicker();
 }
@@ -221,53 +321,69 @@ registerDialog({
   // Only the floor count can change under a live session; `revision` ticks on
   // every placed piece and must NOT rebuild the panel (the design itself renders
   // through the world/tile pipeline, not here).
-  sig: (hd) => String(hd.floors | 0),
+  sig: (hd) => [hd.floors, hd.floor, hd.revision, hd.tilesReady].join(":"),
   // dismiss:"none" — the ✕ asks the SERVER to end the session (hdesign:close)
   // and this panel waits for that to land, so there is never a locally-closed
   // window for a stale snapshot to resurrect.
   build: (hd, { key }) => {
     hdesignSerial = key;
-    hdesignFloor = 1; hdesignPiece = null; hdesignEraser = false; // fresh session, fresh picker state
+    hdesignFloor = hd.floor || 1; hdesignRoofZ = 0; hdesignPiece = null; hdesignEraser = false; // fresh session, fresh picker state
     buildHouseDesignWindow(hd);
     loadHouseCatalog();
     return hdesignWin;
   },
   update: (win, hd) => {
-    if (win.floors === (hd.floors | 0)) return;
-    win.floors = hd.floors | 0;
-    renderHouseDesignFloors();
+    const changed = win.floors !== hd.floors || hdesignFloor !== (hd.floor || 1);
+    win.floors = hd.floors; hdesignFloor = hd.floor || 1;
+    win.el.querySelector(".hdesign-floor-value").textContent = String(hdesignFloor);
+    if (changed) { renderHouseDesignFloors(); clearHouseDesignGhost(); }
+    if (hdesignPending && (hdesignPending.floor ? hd.floor === hdesignPending.floor : hd.revision !== hdesignPending.revision)) {
+      clearTimeout(hdesignPendingTimer); hdesignPending = null;
+      hdesignStatus("Server design updated. Commit when ready to save the house.");
+    }
   },
   close: closeHouseDesignWindow,
 });
-// Left-click handler for design mode, called from the canvas mousedown below BEFORE
-// the target-cursor branch so it takes priority whenever a session is open — returns
-// true to tell the caller the click is consumed (even when nothing is actually sent,
-// e.g. no piece picked yet), false when there's no session at all so every existing
-// path (target cursor, steering) runs exactly as before scene.houseDesign existed.
-// Coordinates are FOUNDATION-relative: ServUO `Designer_Build` does
-// `mcl.Add(itemID, x, y, z)` with x/y already relative to the multi's center and
-// derives z from the CURRENT floor server-side — so add/stair send no z at all.
-// Roof pieces are the one exception the wire format itself calls out (both
-// hdesign:roof and hdesign:roofdel take a z): a roof can sit at more than one height
-// on the same tile, so we pass the clicked tile's z (from groundTileAt) there —
-// erasing anything else needs that same z to disambiguate which item on the tile.
+// Use authoritative relative bounds/tiles, never a guessed scene tile or the
+// selected palette graphic, to erase. Roof additions use the protocol's height
+// offset above the current floor; deletion uses the actual tile's relative z.
+// Scene/static pointer hits take priority; keyboard tile application selects the
+// highest piece in the current floor band. The server remains the final authority.
+function houseDesignTileAllowed(dx, dy) {
+  const hd = scene && scene.houseDesign, b = hd && hd.bounds;
+  return !!hd && hd.tilesReady === true && Number.isInteger(dx) && Number.isInteger(dy) && !!b &&
+    dx >= b.minX && dx <= b.maxX && dy >= b.minY && dy <= b.maxY;
+}
+function applyHouseDesignTile(dx, dy, picked = null) {
+  const hd = scene && scene.houseDesign;
+  if (!houseDesignTileAllowed(dx, dy)) { hdesignStatus("Choose a tile inside the loaded foundation. Resync if the design is still loading."); return; }
+  if (hdesignEraser) {
+    const tiles = (hd.tiles || []).filter((t) => t.x === dx && t.y === dy && (!picked || (t.graphic === picked.graphic && t.z === picked.z)));
+    const tile = picked ? tiles[0] : tiles.filter((t) => t.z >= (hd.floorZ - 3) && t.z < hd.floorZ + 20).sort((a, b) => b.z - a.z)[0];
+    if (!tile) { hdesignStatus("No design piece on that tile and floor. Click the piece itself, or choose another tile."); return; }
+    const roof = hdesignStyles("roof").some((style) => style.graphics.includes(tile.graphic));
+    hdesignSend(`${roof ? "roofdel" : "del"}:${tile.graphic}:${dx}:${dy}:${tile.z}`, "Erase requested", true);
+  } else {
+    if (!hdesignPiece) { hdesignStatus("Choose a building piece first, or turn on Eraser."); return; }
+    const { mode, graphic, command } = hdesignPiece;
+    if (mode === "roof" && ![-3, 0, 3, 6, 9, 12].includes(hdesignRoofZ)) { hdesignStatus("Choose a supported roof height."); return; }
+    const cmd = mode === "roof" ? `roof:${graphic}:${dx}:${dy}:${hdesignRoofZ}` : `${command || "add"}:${graphic}:${dx}:${dy}`;
+    hdesignSend(cmd, "Place requested", true);
+  }
+}
+function handleHouseDesignStatic(st) {
+  const hd = scene && scene.houseDesign;
+  if (!hd || !hdesignEraser) return false;
+  const dx = st.x - hd.x, dy = st.y - hd.y, z = st.z - hd.z;
+  if (!(hd.tiles || []).some((t) => t.x === dx && t.y === dy && t.z === z && t.graphic === st.g)) return false;
+  hdesignConsumedAt = performance.now(); applyHouseDesignTile(dx, dy, { graphic: st.g, z }); return true;
+}
 function handleHouseDesignClick(e) {
   const hd = scene && scene.houseDesign;
   if (!hd) return false;
-  if (!hdesignPiece || hd.x == null) return true; // nothing selected, or foundation position not known yet
-  const g = clientToGlobal(e.clientX, e.clientY);
-  const t = groundTileAt(g.x, g.y);
-  const dx = t.x - (hd.x | 0), dy = t.y - (hd.y | 0);
-  // `graphic` is always a catalog id off hdesignPiece — never a scene/static/
-  // multi graphic — and renderHouseDesignGrid already dropped anything that
-  // couldn't legally be picked (0, or >= HDESIGN_MAX_GRAPHIC — see its doc:
-  // the server drops those silently, comp_val.log only, no client-visible
-  // error), so there's nothing further to validate here before sending.
-  const { mode, graphic } = hdesignPiece;
-  if (hdesignEraser) sendInput(`hdesign:${mode === "roof" ? "roofdel" : "del"}:${graphic}:${dx}:${dy}:${t.z}`);
-  else if (mode === "stair") sendInput(`hdesign:stair:${graphic}:${dx}:${dy}`);
-  else if (mode === "roof") sendInput(`hdesign:roof:${graphic}:${dx}:${dy}:${t.z}`);
-  else sendInput(`hdesign:add:${graphic}:${dx}:${dy}`);
+  if (performance.now() - hdesignConsumedAt < 200) return true;
+  const g = clientToGlobal(e.clientX, e.clientY), t = groundTileAt(g.x, g.y);
+  applyHouseDesignTile(t.x - hd.x, t.y - hd.y);
   return true;
 }
 

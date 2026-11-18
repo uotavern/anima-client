@@ -1215,6 +1215,29 @@
       .hdesign-floor-btn.active { color: #fff; background: rgba(138, 180, 248, .3); border-color: #4a7ab8; }
       .hdesign-actions { display: flex; flex-wrap: wrap; gap: 6px; }
       .hdesign-actions .dlg-btn { flex: 1; min-width: 64px; text-align: center; }
+      /* House tools remain reachable without covering the entire small viewport. */
+      .hdesign-win { width: min(350px, calc(100vw - 16px)); max-height: calc(100vh - 56px); max-height: calc(100dvh - 56px); display: flex; flex-direction: column; }
+      .hdesign-win .gump-body { min-height: 0; overflow-y: auto; }
+      .hdesign-win label, .hdesign-floor-label { font-size: 12px; }
+      .hdesign-help, .hdesign-coordinates p { font-size: 12px; line-height: 1.4; color: #c3cbd8; }
+      .hdesign-win button { min-height: 32px; font: inherit; }
+      .hdesign-win :is(button, input, select, summary):focus-visible { outline: 2px solid #b9d6ff; outline-offset: 2px; }
+      .hdesign-win .gump-close button { color: inherit; background: transparent; border: 0; cursor: pointer; min-width: 32px; }
+      .hdesign-tab[aria-pressed="true"], .hdesign-floor-btn[aria-pressed="true"] { color: #fff; background: #284b78; border-color: #b9d6ff; }
+      .hdesign-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+      .hdesign-piece { width: auto; height: auto; min-height: 76px; display: flex; flex-direction: column; align-items: center; color: #dce8f8; padding: 4px; }
+      .hdesign-piece-icon { width: 48px; height: 48px; }
+      .hdesign-piece span { font-size: 10px; overflow-wrap: anywhere; }
+      .hdesign-piece[aria-pressed="true"] { outline: 2px solid #b9d6ff; outline-offset: -2px; background: #284b78; }
+      .hdesign-status { padding: 8px; border-left: 3px solid #8ab4f8; background: #172438; font-size: 12px; line-height: 1.4; }
+      .hdesign-roof, .hdesign-xy input { box-sizing: border-box; background: #14171c; color: #d6dae0; border: 1px solid #566278; border-radius: 4px; padding: 6px; }
+      .hdesign-roof { width: 100%; margin: 4px 0 8px; }
+      .hdesign-xy { display: flex; gap: 8px; margin: 8px 0; }
+      .hdesign-xy label { flex: 1; min-width: 0; }
+      .hdesign-xy input { width: 100%; }
+      .hdesign-win [hidden] { display: none; }
+      @media (pointer: coarse) { .hdesign-win button, .hdesign-win select, .hdesign-win input { min-height: 44px; } }
+      @media (forced-colors: active) { .hdesign-piece[aria-pressed="true"], .hdesign-tab[aria-pressed="true"] { outline-color: Highlight; border-color: Highlight; } }
       /* ---- name plates, pinned health bars, drag-select, chat mode ----
          (G4/G6/G8/G9: ClassicUO NameOverheadGump / HealthBarGump /
          DragSelect / SystemChatControl.) */
