@@ -355,6 +355,7 @@ function saveWinGeom(key, g) {
 // (the static panels), otherwise its own class (the dynamic windows). Never the
 // serial — see the note above.
 function winKey(el) {
+  if (el.dataset.windowGeometryKey) return el.dataset.windowGeometryKey;
   if (el.id) return "#" + el.id;
   const cls = [...el.classList].find((c) => c !== "gump-win" && c !== "on");
   return cls ? "." + cls : null;
@@ -415,10 +416,13 @@ window.addEventListener("resize", clampAllWindows);
 
 function makeWindowFrame({
   cls, title, bodyCls, cascade, pos, onClose, draggable = true,
-  resizable = false,
+  resizable = false, geometryKey,
 }) {
   const el = document.createElement("div");
   el.className = "gump-win" + (cls ? " " + cls : "");
+  // Assign before restore/observation: distinct server dialog kinds must not
+  // inherit a small previous dialog's size. Legacy shared settings stay stored.
+  if (geometryKey && /^[#.][a-z0-9_-]{1,128}$/i.test(geometryKey)) el.dataset.windowGeometryKey = geometryKey;
   // Position: `pos`/`cascade` set the default. A remembered position, if there
   // is one, is applied later by `makeDraggable` and wins — the user put it
   // there on purpose.
