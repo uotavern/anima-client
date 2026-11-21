@@ -27,13 +27,13 @@ impl RadarCol {
 
     /// Radar color for a land graphic (index `graphic & 0x3FFF`).
     pub fn land_color(&self, graphic: u16) -> [u8; 3] {
-        self.rgb((graphic & 0x3FFF) as usize)
+        self.rgb(crate::art::land_art_index(graphic))
     }
 
     /// Radar color for a static graphic (index `0x4000 + graphic`). Out-of-range
     /// → black `[0, 0, 0]`.
     pub fn static_color(&self, graphic: u16) -> [u8; 3] {
-        self.rgb(0x4000 + graphic as usize)
+        self.rgb(crate::art::static_art_index(graphic))
     }
 
     /// ARGB1555 (LE u16) at `idx` → RGB8 (standard 5→8 expansion); OOB → black.

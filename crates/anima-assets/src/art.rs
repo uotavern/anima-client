@@ -93,6 +93,21 @@ pub const STATIC_ART_BASE: usize = 0x4000;
 /// so stopping at `0x8000` silently drops them.
 pub const ART_INDEX_COUNT: usize = STATIC_ART_BASE + 0x1_0000;
 
+/// Mask that folds a land graphic into the land art range `0..STATIC_ART_BASE`.
+pub const LAND_GRAPHIC_MASK: u16 = (STATIC_ART_BASE - 1) as u16;
+
+/// Art index of a land graphic (`graphic & 0x3FFF`).
+pub fn land_art_index(graphic: u16) -> usize {
+    (graphic & LAND_GRAPHIC_MASK) as usize
+}
+
+/// Art index of a static graphic (`0x4000 + graphic`). Every `u16` static maps
+/// below [`ART_INDEX_COUNT`]; nothing is masked, so ids past 0x3FFF stay
+/// distinct from the land range.
+pub fn static_art_index(graphic: u16) -> usize {
+    STATIC_ART_BASE + graphic as usize
+}
+
 /// Write art entries `0..count` as a legacy `artidx.mul` + `art.mul` pair.
 /// `read(index)` supplies an entry's raw bytes, or `None` for an empty slot.
 /// Returns the number of entries written with data.
@@ -196,7 +211,7 @@ impl Art {
 
     /// Decode a land tile (graphic 0..0x3FFF) to a 44×44 RGBA image.
     pub fn land(&self, graphic: u16) -> Option<Image> {
-        let (data, _) = self.resolve((graphic & 0x3FFF) as usize)?;
+        let (data, _) = self.resolve(land_art_index(graphic))?;
         let mut rgba = vec![0u8; LAND_DIM * LAND_DIM * 4];
         let mut p = 0usize;
         let put = |x: usize, y: usize, c: u16, rgba: &mut [u8]| {
@@ -258,7 +273,7 @@ impl Art {
 
     /// Decode a static tile (graphic, art index 0x4000+graphic) to RGBA.
     pub fn static_tile(&self, graphic: u16) -> Option<Image> {
-        let (data, _) = self.resolve(STATIC_ART_BASE + graphic as usize)?;
+        let (data, _) = self.resolve(static_art_index(graphic))?;
         if data.len() < 8 {
             return None;
         }
@@ -414,6 +429,57 @@ mod tests {
             assert_eq!(img.rgba[3], 255, "static {g} pixel should be opaque");
         }
         assert!(art.static_tile(16385).is_none());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn art_index_mapping_keeps_high_statics_out_of_the_land_range() {
+        assert_eq!(land_art_index(0x0003), 0x0003);
+        assert_eq!(land_art_index(0x4003), 0x0003, "land folds into 0..0x4000");
+        assert_eq!(static_art_index(0), STATIC_ART_BASE);
+        // Coliseum static 0x4301: index 0x8301, not masked down to land 0x0301.
+        assert_eq!(static_art_index(0x4301), 0x8301);
+        assert_eq!(static_art_index(0xFFFF), ART_INDEX_COUNT - 1);
+    }
+
+    #[test]
+    fn def_hue_resolves_alias_for_static_past_0x3fff() {
+        // `/art/static/<g>.png` asks `def_hue(static_art_index(g))` for the
+        // `art.def` fallback hue. A missing static past 0x3FFF must find its
+        // own alias line (index 0x4000 + g), not land's or a truncated one.
+        let missing = 0x4301u16;
+        let present = 0x0001u16;
+        let mut idx = Vec::new();
+        let mut mul = Vec::new();
+        write_legacy_art(
+            ART_INDEX_COUNT,
+            |i| (i == static_art_index(present)).then(|| one_pixel_static(0x7C00)),
+            &mut idx,
+            &mut mul,
+        )
+        .unwrap();
+        let dir = std::env::temp_dir().join(format!("anima_art_def_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("artidx.mul"), &idx).unwrap();
+        std::fs::write(dir.join("art.mul"), &mul).unwrap();
+        std::fs::write(
+            dir.join("art.def"),
+            format!(
+                "{} {{{}}} 33\n",
+                static_art_index(missing),
+                static_art_index(present)
+            ),
+        )
+        .unwrap();
+        let art = Art::open(&dir).unwrap();
+        assert_eq!(art.def_hue(static_art_index(missing)), 33);
+        assert!(art.static_tile(missing).is_some(), "alias supplies pixels");
+        assert_eq!(art.def_hue(land_art_index(missing)), 0);
+        assert_eq!(
+            art.def_hue(static_art_index(present)),
+            0,
+            "present: no def hue"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
