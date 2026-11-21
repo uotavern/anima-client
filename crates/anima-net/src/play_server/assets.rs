@@ -572,9 +572,9 @@ pub(super) fn serve_art(
                 guard.land(g)
             };
             let idx = if is_static {
-                0x4000 + g as usize
+                anima_assets::art::static_art_index(g)
             } else {
-                (g & 0x3FFF) as usize
+                anima_assets::art::land_art_index(g)
             };
             let paint = if hue != 0 { hue } else { guard.def_hue(idx) };
             img.map(|i| (i, paint))
@@ -743,6 +743,20 @@ pub(super) fn house_catalog_json(data_dir: &Path) -> String {
         "roofs": categories_json(&catalog.roofs, |r| (r.comment.as_str(), r.graphics.as_slice())),
     });
     serde_json::to_string(&body).unwrap_or_else(|_| "{}".into())
+}
+
+#[cfg(test)]
+mod art_url_tests {
+    use super::parse_art_url;
+
+    #[test]
+    fn static_art_url_keeps_ids_past_0x3fff() {
+        // The replay pack bug dropped statics >= 16384; the route must not.
+        assert_eq!(parse_art_url("/art/static/16384.png"), Some((true, 0x4000)));
+        assert_eq!(parse_art_url("/art/static/65535.png"), Some((true, 0xFFFF)));
+        assert_eq!(parse_art_url("/art/land/16387.png"), Some((false, 0x4003)));
+        assert_eq!(parse_art_url("/art/static/65536.png"), None);
+    }
 }
 
 #[cfg(test)]
